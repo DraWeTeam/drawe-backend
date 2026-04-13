@@ -1,9 +1,9 @@
 ---
 name: Issue Template
 about: 작업하신 내용을 작성해주세요.
-title: BUG
+title: Issue Template
 labels: documentation
-assignees: sjpark3579, YujinB, hyegyeongseo, LHG1515, hyijin122-a11y
+assignees: hyegyeongseo, hyijin122-a11y, LHG1515, sjpark3579, YujinB
 type: Feature
 
 ---
