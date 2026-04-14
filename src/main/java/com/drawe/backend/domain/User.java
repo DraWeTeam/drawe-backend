@@ -36,6 +36,9 @@ public class User {
     @Column(name = "nickname", nullable = false, length = 100)
     private String nickname;
 
+    @Column(length = 500)
+    private String picture;
+
     //null(일반) / google
     @Size(max = 20)
     @Column(name = "provider", length = 20)
