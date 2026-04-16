@@ -1,0 +1,588 @@
+openapi: 3.0.3
+info:
+  title: DraWe Auth API
+  description: |
+    DraWe 백엔드 인증 API. 현재 구현된 7개 엔드포인트.
+    - 모든 응답은 `{success, data}` 또는 `{success, error}` envelope을 사용합니다.
+    - 인증이 필요한 엔드포인트는 `Authorization: Bearer <accessToken>` 헤더를 요구합니다.
+  version: "1.0.0"
+servers:
+  - url: http://localhost:8081
+    description: 로컬 개발 서버
+
+tags:
+  - name: Authentication
+    description: 회원가입 / 로그인 / 토큰 / 중복 검사
+
+paths:
+  /auth/signup:
+    post:
+      tags: [Authentication]
+      summary: 이메일 회원가입
+      operationId: signup
+      description: 이메일·비밀번호·닉네임으로 신규 계정을 생성합니다.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SignupRequest'
+            examples:
+              valid:
+                summary: 정상 회원가입
+                value:
+                  email: alice@example.com
+                  password: Password123
+                  nickname: alice
+              shortPassword:
+                summary: 비밀번호 8자 미만 (검증 실패)
+                value:
+                  email: bob@example.com
+                  password: x
+                  nickname: bob
+              invalidEmail:
+                summary: 잘못된 이메일 형식
+                value:
+                  email: notanemail
+                  password: Password123
+                  nickname: bob
+      responses:
+        '200':
+          description: 회원가입 성공
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/SignupData'
+              example:
+                success: true
+                data:
+                  userId: 1
+                  email: alice@example.com
+                  nickname: alice
+        '400':
+          description: 검증 실패
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                shortPassword:
+                  value:
+                    success: false
+                    error:
+                      code: INVALID_INPUT
+                      message: 비밀번호는 8자 이상이어야 합니다
+                      timestamp: "2026-04-16T09:49:53.6457699"
+                invalidEmail:
+                  value:
+                    success: false
+                    error:
+                      code: INVALID_INPUT
+                      message: 이메일 형식이 올바르지 않습니다
+                      timestamp: "2026-04-16T09:49:53.6932053"
+        '409':
+          description: 이메일 또는 닉네임 중복
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                emailExists:
+                  value:
+                    success: false
+                    error:
+                      code: EMAIL_ALREADY_EXISTS
+                      message: 이미 사용 중인 이메일입니다.
+                      timestamp: "2026-04-16T09:49:53.5410469"
+                nicknameExists:
+                  value:
+                    success: false
+                    error:
+                      code: NICKNAME_ALREADY_EXISTS
+                      message: 이미 사용 중인 닉네임입니다.
+                      timestamp: "2026-04-16T09:49:53.5951067"
+
+  /auth/login:
+    post:
+      tags: [Authentication]
+      summary: 로컬 로그인
+      operationId: login
+      description: |
+        이메일/비밀번호로 로그인합니다.
+        - 성공 시 AccessToken·RefreshToken 및 사용자 정보(`userId`, `email`, `nickname`, `provider`, `role`) 반환
+        - 비밀번호 오류·미존재 사용자 모두 `401 UNAUTHORIZED` (보안상 통일)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+            examples:
+              valid:
+                summary: 정상 로그인
+                value:
+                  email: alice@example.com
+                  password: Password123
+              wrongPassword:
+                summary: 비밀번호 오류
+                value:
+                  email: alice@example.com
+                  password: wrong
+              unknownUser:
+                summary: 미존재 사용자
+                value:
+                  email: nobody@example.com
+                  password: Password123
+      responses:
+        '200':
+          description: 로그인 성공
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/AuthData'
+              example:
+                success: true
+                data:
+                  userId: 1
+                  accessToken: eyJhbGciOiJIUzUxMiJ9.eyJzdWIiOiIxIiwiZW1haWwiOiJhbGljZUBleGFtcGxlLmNvbSIsIm5pY2tuYW1lIjoiYWxpY2UiLCJpYXQiOjE3NzYzMDA2MDUsImV4cCI6MTc3NjMwNDIwNX0.signature
+                  refreshToken: eyJhbGciOiJIUzUxMiJ9.eyJzdWIiOiIxIiwiaWF0IjoxNzc2MzAwNjA1LCJleHAiOjE3NzY5MDU0MDV9.signature
+                  email: alice@example.com
+                  nickname: alice
+                  provider: LOCAL
+                  role: USER
+        '401':
+          description: 인증 실패
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                success: false
+                error:
+                  code: UNAUTHORIZED
+                  message: 인증이 필요합니다. 로그인 후 다시 시도해주세요.
+                  timestamp: "2026-04-16T09:50:05.3297804"
+
+  /auth/reissue:
+    post:
+      tags: [Authentication]
+      summary: 토큰 재발급 (Refresh Rotation)
+      operationId: reissue
+      description: |
+        RefreshToken으로 새 AccessToken·RefreshToken을 발급합니다.
+        - 발급과 동시에 기존 RefreshToken은 무효화됩니다 (rotation)
+        - 회전된 토큰 재사용 시 `401 INVALID_TOKEN`
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RefreshTokenRequest'
+            examples:
+              valid:
+                summary: 유효한 RefreshToken
+                value:
+                  refreshToken: "<유효한 refresh token>"
+              invalid:
+                summary: 잘못된 토큰 문자열
+                value:
+                  refreshToken: garbage
+      responses:
+        '200':
+          description: 재발급 성공
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/TokenData'
+              example:
+                success: true
+                data:
+                  accessToken: eyJhbGciOiJIUzUxMiJ9.<new-access>.signature
+                  refreshToken: eyJhbGciOiJIUzUxMiJ9.<new-refresh>.signature
+        '401':
+          description: 유효하지 않은 토큰
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                success: false
+                error:
+                  code: INVALID_TOKEN
+                  message: 유효하지 않은 토큰입니다.
+                  timestamp: "2026-04-16T09:50:21.5485832"
+
+  /auth/logout:
+    post:
+      tags: [Authentication]
+      summary: 로그아웃
+      operationId: logout
+      description: |
+        현재 사용자의 모든 RefreshToken을 삭제합니다.
+        - `Authorization: Bearer <accessToken>` 헤더 필수
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: 로그아웃 성공
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessResponse'
+              example:
+                success: true
+        '401':
+          description: 인증 실패 (Bearer 누락 또는 토큰 무효)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                success: false
+                error:
+                  code: UNAUTHORIZED
+                  message: 인증이 필요합니다. 로그인 후 다시 시도해주세요.
+                  timestamp: "2026-04-16T09:50:34.3133458"
+
+  /auth/check-email:
+    get:
+      tags: [Authentication]
+      summary: 이메일 중복 검사
+      operationId: checkEmail
+      parameters:
+        - name: email
+          in: query
+          required: true
+          description: 확인할 이메일
+          schema:
+            type: string
+            format: email
+          examples:
+            available:
+              summary: 사용 가능한 이메일
+              value: fresh@example.com
+            duplicate:
+              summary: 이미 사용 중
+              value: alice@example.com
+            invalid:
+              summary: 잘못된 형식
+              value: notanemail
+      responses:
+        '200':
+          description: 사용 가능한 이메일
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/AvailabilityData'
+              example:
+                success: true
+                data:
+                  available: true
+        '400':
+          description: 잘못된 형식
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                success: false
+                error:
+                  code: INVALID_INPUT
+                  message: 올바른 형식의 이메일 주소여야 합니다
+                  timestamp: "2026-04-16T09:50:21.2996054"
+        '409':
+          description: 이미 사용 중인 이메일
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                success: false
+                error:
+                  code: EMAIL_ALREADY_EXISTS
+                  message: 이미 사용 중인 이메일입니다.
+                  timestamp: "2026-04-16T09:50:21.2416214"
+
+  /auth/check-nickname:
+    get:
+      tags: [Authentication]
+      summary: 닉네임 중복 검사
+      operationId: checkNickname
+      parameters:
+        - name: nickname
+          in: query
+          required: true
+          description: 확인할 닉네임
+          schema:
+            type: string
+          examples:
+            available:
+              summary: 사용 가능한 닉네임
+              value: newone
+            duplicate:
+              summary: 이미 사용 중
+              value: alice
+      responses:
+        '200':
+          description: 사용 가능한 닉네임
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/AvailabilityData'
+              example:
+                success: true
+                data:
+                  available: true
+        '409':
+          description: 이미 사용 중인 닉네임
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                success: false
+                error:
+                  code: NICKNAME_ALREADY_EXISTS
+                  message: 이미 사용 중인 닉네임입니다.
+                  timestamp: "2026-04-16T09:50:21.3965872"
+
+  /auth/check-password:
+    post:
+      tags: [Authentication]
+      summary: 비밀번호 확인
+      operationId: checkPassword
+      description: |
+        민감한 작업 전 현재 사용자의 비밀번호를 재확인합니다.
+        - `Authorization: Bearer <accessToken>` 헤더 필수
+        - 비밀번호 불일치 시 `401 UNAUTHORIZED`
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PasswordCheckRequest'
+            examples:
+              valid:
+                summary: 정상 비밀번호
+                value:
+                  password: Password123
+              wrong:
+                summary: 잘못된 비밀번호
+                value:
+                  password: wrong
+      responses:
+        '200':
+          description: 비밀번호 확인 성공
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessResponse'
+              example:
+                success: true
+        '401':
+          description: 인증 실패 (Bearer 누락 또는 비밀번호 불일치)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                success: false
+                error:
+                  code: UNAUTHORIZED
+                  message: 인증이 필요합니다. 로그인 후 다시 시도해주세요.
+                  timestamp: "2026-04-16T09:50:34.2687796"
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: API 요청 시 `Authorization` 헤더에 `Bearer <accessToken>` 형식으로 전송
+
+  schemas:
+    SignupRequest:
+      type: object
+      required: [email, password, nickname]
+      properties:
+        email:
+          type: string
+          format: email
+          example: alice@example.com
+        password:
+          type: string
+          format: password
+          minLength: 8
+          example: Password123
+        nickname:
+          type: string
+          minLength: 2
+          maxLength: 20
+          example: alice
+
+    LoginRequest:
+      type: object
+      required: [email, password]
+      properties:
+        email:
+          type: string
+          format: email
+          example: alice@example.com
+        password:
+          type: string
+          format: password
+          example: Password123
+
+    RefreshTokenRequest:
+      type: object
+      required: [refreshToken]
+      properties:
+        refreshToken:
+          type: string
+          description: 로그인 또는 reissue로 발급받은 RefreshToken
+
+    PasswordCheckRequest:
+      type: object
+      required: [password]
+      properties:
+        password:
+          type: string
+          format: password
+          example: Password123
+
+    SignupData:
+      type: object
+      required: [userId, email, nickname]
+      properties:
+        userId:
+          type: integer
+          format: int64
+          example: 1
+        email:
+          type: string
+          example: alice@example.com
+        nickname:
+          type: string
+          example: alice
+
+    AuthData:
+      type: object
+      required: [userId, accessToken, refreshToken, email, nickname, provider, role]
+      properties:
+        userId:
+          type: integer
+          format: int64
+          example: 1
+        accessToken:
+          type: string
+          example: eyJhbGciOiJIUzUxMiJ9.<payload>.<signature>
+        refreshToken:
+          type: string
+          example: eyJhbGciOiJIUzUxMiJ9.<payload>.<signature>
+        email:
+          type: string
+          example: alice@example.com
+        nickname:
+          type: string
+          example: alice
+        provider:
+          type: string
+          enum: [LOCAL, GOOGLE, KAKAO, NAVER]
+          example: LOCAL
+        role:
+          type: string
+          enum: [USER, ADMIN]
+          example: USER
+
+    TokenData:
+      type: object
+      required: [accessToken, refreshToken]
+      properties:
+        accessToken:
+          type: string
+        refreshToken:
+          type: string
+
+    AvailabilityData:
+      type: object
+      required: [available]
+      properties:
+        available:
+          type: boolean
+          example: true
+
+    SuccessResponse:
+      type: object
+      required: [success]
+      properties:
+        success:
+          type: boolean
+          example: true
+        data:
+          type: object
+          description: 응답 페이로드 (엔드포인트마다 다름)
+        message:
+          type: string
+          description: 추가 메시지 (선택)
+
+    ErrorResponse:
+      type: object
+      required: [success, error]
+      properties:
+        success:
+          type: boolean
+          example: false
+        error:
+          type: object
+          required: [code, message, timestamp]
+          properties:
+            code:
+              type: string
+              enum:
+                - INVALID_INPUT
+                - UNAUTHORIZED
+                - FORBIDDEN
+                - NOT_FOUND
+                - EMAIL_ALREADY_EXISTS
+                - NICKNAME_ALREADY_EXISTS
+                - USER_NOT_FOUND
+                - INVALID_TOKEN
+                - INTERNAL_SERVER_ERROR
+              example: INVALID_INPUT
+            message:
+              type: string
+              example: 입력값이 올바르지 않습니다.
+            details:
+              type: object
+              additionalProperties: true
+            timestamp:
+              type: string
+              format: date-time
+              example: "2026-04-16T09:49:53.6457699"
