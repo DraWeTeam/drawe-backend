@@ -3,7 +3,10 @@ package com.drawe.backend.domain;
 import jakarta.persistence.*;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Size;
+import lombok.AccessLevel;
+import lombok.Builder;
 import lombok.Getter;
+import lombok.NoArgsConstructor;
 import lombok.Setter;
 import org.hibernate.annotations.CreationTimestamp;
 
@@ -12,6 +15,7 @@ import java.time.Instant;
 @Getter
 @Setter
 @Entity
+@NoArgsConstructor(access = AccessLevel.PROTECTED)
 @Table(name = "users",
         indexes = {
         @Index(name = "idx_user_prov_pid", columnList = "provider, provider_id")})
@@ -52,4 +56,14 @@ public class User {
     @Column(name = "created_at", updatable = false)
     private Instant createdAt;
 
+    @Builder
+    public User(String email, String password, String nickname, String picture,
+                String provider, String providerId) {
+        this.email = email;
+        this.password = password;
+        this.nickname = nickname;
+        this.picture = picture;
+        this.provider = provider;
+        this.providerId = providerId;
+    }
 }

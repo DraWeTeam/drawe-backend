@@ -1,12 +1,10 @@
 package com.drawe.backend.domain.auth.service;
 
+import com.drawe.backend.domain.RefreshToken;
+import com.drawe.backend.domain.User;
 import com.drawe.backend.domain.auth.dto.*;
-import com.drawe.backend.domain.user.entity.AuthProvider;
-import com.drawe.backend.domain.user.entity.RefreshToken;
-import com.drawe.backend.domain.user.entity.Role;
-import com.drawe.backend.domain.user.entity.User;
-import com.drawe.backend.domain.user.repository.RefreshTokenRepository;
-import com.drawe.backend.domain.user.repository.UserRepository;
+import com.drawe.backend.domain.repository.RefreshTokenRepository;
+import com.drawe.backend.domain.repository.UserRepository;
 import com.drawe.backend.global.error.CustomException;
 import com.drawe.backend.global.error.ErrorCode;
 import com.drawe.backend.global.security.JwtTokenProvider;
@@ -15,7 +13,8 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.time.LocalDateTime;
+import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 
 @Service
 @RequiredArgsConstructor
@@ -40,8 +39,6 @@ public class AuthService {
                 .email(request.getEmail())
                 .password(passwordEncoder.encode(request.getPassword()))
                 .nickname(request.getNickname())
-                .provider(AuthProvider.LOCAL)
-                .role(Role.USER)
                 .build();
 
         userRepository.save(user);
@@ -81,14 +78,16 @@ public class AuthService {
             throw new CustomException(ErrorCode.INVALID_TOKEN);
         }
 
-        User user = userRepository.findById(stored.getUserId())
-                .orElseThrow(() -> new CustomException(ErrorCode.USER_NOT_FOUND));
+        User user = stored.getUser();
+        if (user == null) {
+            throw new CustomException(ErrorCode.USER_NOT_FOUND);
+        }
 
         refreshTokenRepository.deleteByToken(token);
 
         String newAccessToken = jwtTokenProvider.createAccessToken(user.getId(), user.getEmail(), user.getNickname());
         String newRefreshToken = jwtTokenProvider.createRefreshToken(user.getId());
-        saveRefreshToken(user.getId(), newRefreshToken);
+        saveRefreshToken(user, newRefreshToken);
 
         return TokenResponse.builder()
                 .accessToken(newAccessToken)
@@ -127,7 +126,7 @@ public class AuthService {
     private AuthResponse issueTokens(User user) {
         String accessToken = jwtTokenProvider.createAccessToken(user.getId(), user.getEmail(), user.getNickname());
         String refreshToken = jwtTokenProvider.createRefreshToken(user.getId());
-        saveRefreshToken(user.getId(), refreshToken);
+        saveRefreshToken(user, refreshToken);
 
         return AuthResponse.builder()
                 .userId(user.getId())
@@ -136,15 +135,14 @@ public class AuthService {
                 .email(user.getEmail())
                 .nickname(user.getNickname())
                 .provider(user.getProvider())
-                .role(user.getRole())
                 .build();
     }
 
-    private void saveRefreshToken(Long userId, String token) {
+    private void saveRefreshToken(User user, String token) {
         refreshTokenRepository.save(RefreshToken.builder()
-                .userId(userId)
+                .user(user)
                 .token(token)
-                .expiresAt(LocalDateTime.now().plusDays(7))
+                .expiryAt(Instant.now().plus(7, ChronoUnit.DAYS))
                 .build());
     }
 }

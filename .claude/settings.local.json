@@ -25,7 +25,15 @@
       "Bash(curl -s -X POST http://localhost:8081/auth/signup -H \"Content-Type: application/json\" -d '{\"email\":\"alice@example.com\",\"password\":\"Password123\",\"nickname\":\"alice2\"}')",
       "Bash(curl -s -X POST http://localhost:8081/auth/signup -H \"Content-Type: application/json\" -d '{\"email\":\"other@example.com\",\"password\":\"Password123\",\"nickname\":\"alice\"}')",
       "Bash(curl -s -X POST http://localhost:8081/auth/signup -H \"Content-Type: application/json\" -d '{\"email\":\"bob@example.com\",\"password\":\"x\",\"nickname\":\"bob\"}')",
-      "Bash(curl -s -X POST http://localhost:8081/auth/signup -H \"Content-Type: application/json\" -d '{\"email\":\"notanemail\",\"password\":\"Password123\",\"nickname\":\"bob\"}')"
+      "Bash(curl -s -X POST http://localhost:8081/auth/signup -H \"Content-Type: application/json\" -d '{\"email\":\"notanemail\",\"password\":\"Password123\",\"nickname\":\"bob\"}')",
+      "Bash(./gradlew build *)",
+      "Bash(./gradlew clean *)",
+      "Bash(git ls-tree *)",
+      "Bash(./gradlew dependencies *)",
+      "Bash(./gradlew bootRun *)",
+      "Bash(findstr :8081)",
+      "Bash(powershell Get-Process -Id 1960 | Select-Object Id, ProcessName, Path *)",
+      "Bash(powershell Stop-Process -Id 1960 -Force *)"
     ],
     "deny": [],
     "ask": []
