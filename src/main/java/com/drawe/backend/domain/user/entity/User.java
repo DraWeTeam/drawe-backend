@@ -24,8 +24,16 @@ public class User {
     @Column(nullable = false)
     private String password;
 
-    @Column(nullable = false, length = 20)
+    @Column(nullable = false, length = 20, unique = true)
     private String nickname;
+
+    @Enumerated(EnumType.STRING)
+    @Column(nullable = false, length = 20)
+    private AuthProvider provider;
+
+    @Enumerated(EnumType.STRING)
+    @Column(nullable = false, length = 10)
+    private Role role;
 
     @Column(nullable = false)
     private Boolean onboardingCompleted = false;
@@ -48,14 +56,24 @@ public class User {
     }
 
     @Builder
-    public User(String email, String password, String nickname) {
+    public User(String email, String password, String nickname, AuthProvider provider, Role role) {
         this.email = email;
         this.password = password;
         this.nickname = nickname;
+        this.provider = provider != null ? provider : AuthProvider.LOCAL;
+        this.role = role != null ? role : Role.USER;
         this.onboardingCompleted = false;
     }
 
     public void completeOnboarding() {
         this.onboardingCompleted = true;
+    }
+
+    public void changePassword(String encodedPassword) {
+        this.password = encodedPassword;
+    }
+
+    public void changeNickname(String nickname) {
+        this.nickname = nickname;
     }
 }

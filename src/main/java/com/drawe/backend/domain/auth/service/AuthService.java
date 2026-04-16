@@ -1,7 +1,9 @@
 package com.drawe.backend.domain.auth.service;
 
 import com.drawe.backend.domain.auth.dto.*;
+import com.drawe.backend.domain.user.entity.AuthProvider;
 import com.drawe.backend.domain.user.entity.RefreshToken;
+import com.drawe.backend.domain.user.entity.Role;
 import com.drawe.backend.domain.user.entity.User;
 import com.drawe.backend.domain.user.repository.RefreshTokenRepository;
 import com.drawe.backend.domain.user.repository.UserRepository;
@@ -26,99 +28,123 @@ public class AuthService {
     private final JwtTokenProvider jwtTokenProvider;
 
     @Transactional
-    public AuthResponse signup(SignupRequest request) {
+    public SignupResponse signup(SignupRequest request) {
         if (userRepository.existsByEmail(request.getEmail())) {
             throw new CustomException(ErrorCode.EMAIL_ALREADY_EXISTS);
+        }
+        if (userRepository.existsByNickname(request.getNickname())) {
+            throw new CustomException(ErrorCode.NICKNAME_ALREADY_EXISTS);
         }
 
         User user = User.builder()
                 .email(request.getEmail())
                 .password(passwordEncoder.encode(request.getPassword()))
                 .nickname(request.getNickname())
+                .provider(AuthProvider.LOCAL)
+                .role(Role.USER)
                 .build();
 
         userRepository.save(user);
 
-        String accessToken = jwtTokenProvider.createAccessToken(user.getId(), user.getEmail(), user.getNickname());
-        String refreshToken = jwtTokenProvider.createRefreshToken(user.getId());
-
-        saveRefreshToken(user.getId(), refreshToken);
-
-        return AuthResponse.builder()
+        return SignupResponse.builder()
                 .userId(user.getId())
-                .accessToken(accessToken)
-                .refreshToken(refreshToken)
+                .email(user.getEmail())
+                .nickname(user.getNickname())
                 .build();
     }
 
     @Transactional
     public AuthResponse login(LoginRequest request) {
         User user = userRepository.findByEmail(request.getEmail())
-                .orElseThrow(() -> new CustomException(ErrorCode.USER_NOT_FOUND));
+                .orElseThrow(() -> new CustomException(ErrorCode.UNAUTHORIZED));
 
         if (!passwordEncoder.matches(request.getPassword(), user.getPassword())) {
-            throw new CustomException(ErrorCode.INVALID_PASSWORD);
+            throw new CustomException(ErrorCode.UNAUTHORIZED);
         }
 
-        String accessToken = jwtTokenProvider.createAccessToken(user.getId(), user.getEmail(), user.getNickname());
-        String refreshToken = jwtTokenProvider.createRefreshToken(user.getId());
-
-        saveRefreshToken(user.getId(), refreshToken);
-
-        AuthResponse.UserDto userDto = AuthResponse.UserDto.builder()
-                .id(user.getId())
-                .nickname(user.getNickname())
-                .onboardingCompleted(user.getOnboardingCompleted())
-                .build();
-
-        return AuthResponse.builder()
-                .accessToken(accessToken)
-                .refreshToken(refreshToken)
-                .user(userDto)
-                .build();
+        return issueTokens(user);
     }
 
     @Transactional
-    public TokenResponse refresh(RefreshTokenRequest request) {
+    public TokenResponse reissue(RefreshTokenRequest request) {
         String token = request.getRefreshToken();
 
         if (!jwtTokenProvider.validateToken(token)) {
             throw new CustomException(ErrorCode.INVALID_TOKEN);
         }
 
-        RefreshToken refreshToken = refreshTokenRepository.findByToken(token)
+        RefreshToken stored = refreshTokenRepository.findByToken(token)
                 .orElseThrow(() -> new CustomException(ErrorCode.INVALID_TOKEN));
 
-        if (refreshToken.isExpired()) {
+        if (stored.isExpired()) {
+            refreshTokenRepository.deleteByToken(token);
             throw new CustomException(ErrorCode.INVALID_TOKEN);
         }
 
-        User user = userRepository.findById(refreshToken.getUserId())
+        User user = userRepository.findById(stored.getUserId())
                 .orElseThrow(() -> new CustomException(ErrorCode.USER_NOT_FOUND));
 
-        String accessToken = jwtTokenProvider.createAccessToken(user.getId(), user.getEmail(), user.getNickname());
+        refreshTokenRepository.deleteByToken(token);
 
-        return new TokenResponse(accessToken);
+        String newAccessToken = jwtTokenProvider.createAccessToken(user.getId(), user.getEmail(), user.getNickname());
+        String newRefreshToken = jwtTokenProvider.createRefreshToken(user.getId());
+        saveRefreshToken(user.getId(), newRefreshToken);
+
+        return TokenResponse.builder()
+                .accessToken(newAccessToken)
+                .refreshToken(newRefreshToken)
+                .build();
     }
 
     @Transactional
-    public void logout(String token) {
-        if (!jwtTokenProvider.validateToken(token)) {
-            throw new CustomException(ErrorCode.INVALID_TOKEN);
-        }
+    public void logout(Long userId) {
+        refreshTokenRepository.deleteByUserId(userId);
+    }
 
-        refreshTokenRepository.deleteByToken(token);
+    public CheckAvailabilityResponse checkEmail(String email) {
+        if (userRepository.existsByEmail(email)) {
+            throw new CustomException(ErrorCode.EMAIL_ALREADY_EXISTS);
+        }
+        return new CheckAvailabilityResponse(true);
+    }
+
+    public CheckAvailabilityResponse checkNickname(String nickname) {
+        if (userRepository.existsByNickname(nickname)) {
+            throw new CustomException(ErrorCode.NICKNAME_ALREADY_EXISTS);
+        }
+        return new CheckAvailabilityResponse(true);
+    }
+
+    public void checkPassword(Long userId, PasswordCheckRequest request) {
+        User user = userRepository.findById(userId)
+                .orElseThrow(() -> new CustomException(ErrorCode.UNAUTHORIZED));
+
+        if (!passwordEncoder.matches(request.getPassword(), user.getPassword())) {
+            throw new CustomException(ErrorCode.UNAUTHORIZED);
+        }
+    }
+
+    private AuthResponse issueTokens(User user) {
+        String accessToken = jwtTokenProvider.createAccessToken(user.getId(), user.getEmail(), user.getNickname());
+        String refreshToken = jwtTokenProvider.createRefreshToken(user.getId());
+        saveRefreshToken(user.getId(), refreshToken);
+
+        return AuthResponse.builder()
+                .userId(user.getId())
+                .accessToken(accessToken)
+                .refreshToken(refreshToken)
+                .email(user.getEmail())
+                .nickname(user.getNickname())
+                .provider(user.getProvider())
+                .role(user.getRole())
+                .build();
     }
 
     private void saveRefreshToken(Long userId, String token) {
-        LocalDateTime expiresAt = LocalDateTime.now().plusDays(7);
-
-        RefreshToken refreshToken = RefreshToken.builder()
+        refreshTokenRepository.save(RefreshToken.builder()
                 .userId(userId)
                 .token(token)
-                .expiresAt(expiresAt)
-                .build();
-
-        refreshTokenRepository.save(refreshToken);
+                .expiresAt(LocalDateTime.now().plusDays(7))
+                .build());
     }
 }
