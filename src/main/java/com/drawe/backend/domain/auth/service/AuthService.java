@@ -3,18 +3,16 @@ package com.drawe.backend.domain.auth.service;
 import com.drawe.backend.domain.RefreshToken;
 import com.drawe.backend.domain.User;
 import com.drawe.backend.domain.auth.dto.*;
-import com.drawe.backend.repository.RefreshTokenRepository;
-import com.drawe.backend.repository.UserRepository;
+import com.drawe.backend.domain.auth.repository.UserRepository;
 import com.drawe.backend.global.error.CustomException;
 import com.drawe.backend.global.error.ErrorCode;
-import com.drawe.backend.global.security.JwtTokenProvider;
+import com.drawe.backend.global.security.JwtProvider;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
-import java.time.temporal.ChronoUnit;
 
 @Service
 @RequiredArgsConstructor
@@ -22,9 +20,9 @@ import java.time.temporal.ChronoUnit;
 public class AuthService {
 
     private final UserRepository userRepository;
-    private final RefreshTokenRepository refreshTokenRepository;
+    private final RefreshTokenService refreshTokenService;
     private final PasswordEncoder passwordEncoder;
-    private final JwtTokenProvider jwtTokenProvider;
+    private final JwtProvider jwtProvider;
 
     @Transactional
     public SignupResponse signup(SignupRequest request) {
@@ -63,41 +61,74 @@ public class AuthService {
     }
 
     @Transactional
-    public TokenResponse reissue(RefreshTokenRequest request) {
-        String token = request.getRefreshToken();
+    public RefreshTokenResponse refresh(RefreshTokenRequest request) {
+        String refreshToken = request.getRefreshToken();
 
-        if (!jwtTokenProvider.validateToken(token)) {
+        if (refreshToken == null || refreshToken.isBlank()) {
             throw new CustomException(ErrorCode.INVALID_TOKEN);
         }
 
-        RefreshToken stored = refreshTokenRepository.findByToken(token)
-                .orElseThrow(() -> new CustomException(ErrorCode.INVALID_TOKEN));
-
-        if (stored.isExpired()) {
-            refreshTokenRepository.deleteByToken(token);
+        if (!jwtProvider.validateToken(refreshToken)) {
             throw new CustomException(ErrorCode.INVALID_TOKEN);
         }
 
-        User user = stored.getUser();
+        RefreshToken savedToken = refreshTokenService.findByToken(refreshToken);
+
+        if (savedToken.getExpiryAt().isBefore(Instant.now())) {
+            refreshTokenService.deleteByToken(refreshToken);
+            throw new CustomException(ErrorCode.INVALID_TOKEN);
+        }
+
+        User user = savedToken.getUser();
         if (user == null) {
             throw new CustomException(ErrorCode.USER_NOT_FOUND);
         }
 
-        refreshTokenRepository.deleteByToken(token);
+        // rotation
+        refreshTokenService.deleteByToken(refreshToken);
 
-        String newAccessToken = jwtTokenProvider.createAccessToken(user.getId(), user.getEmail(), user.getNickname());
-        String newRefreshToken = jwtTokenProvider.createRefreshToken(user.getId());
-        saveRefreshToken(user, newRefreshToken);
+        String newAccessToken = jwtProvider.createAccessToken(
+                user.getId(),
+                user.getEmail(),
+                user.getNickname()
+        );
+        String newRefreshToken = jwtProvider.createRefreshToken(user.getId());
+        Instant newRefreshExpiry = jwtProvider.getExpiration(newRefreshToken).toInstant();
 
-        return TokenResponse.builder()
+        refreshTokenService.rotate(user, refreshToken, newRefreshToken, newRefreshExpiry);
+
+        return RefreshTokenResponse.builder()
                 .accessToken(newAccessToken)
                 .refreshToken(newRefreshToken)
                 .build();
     }
 
+
     @Transactional
-    public void logout(Long userId) {
-        refreshTokenRepository.deleteByUserId(userId);
+    public void logout(RefreshTokenRequest request) {
+        String refreshToken = request.getRefreshToken();
+
+        if (refreshToken == null || refreshToken.isBlank()) {
+            throw new CustomException(ErrorCode.INVALID_TOKEN);
+        }
+
+        refreshTokenService.deleteByToken(refreshToken);
+    }
+
+    @Transactional
+    public void logoutAll(String authorizationHeader) {
+        String accessToken = extractBearerToken(authorizationHeader);
+
+        if (!jwtProvider.validateToken(accessToken)) {
+            throw new CustomException(ErrorCode.INVALID_TOKEN);
+        }
+
+        Long userId = jwtProvider.getUserIdFromToken(accessToken);
+        if (userId == null) {
+            throw new CustomException(ErrorCode.UNAUTHORIZED);
+        }
+
+        refreshTokenService.deleteAllByUserId(userId);
     }
 
     public CheckAvailabilityResponse checkEmail(String email) {
@@ -124,9 +155,11 @@ public class AuthService {
     }
 
     private AuthResponse issueTokens(User user) {
-        String accessToken = jwtTokenProvider.createAccessToken(user.getId(), user.getEmail(), user.getNickname());
-        String refreshToken = jwtTokenProvider.createRefreshToken(user.getId());
-        saveRefreshToken(user, refreshToken);
+        String accessToken = jwtProvider.createAccessToken(user.getId(), user.getEmail(), user.getNickname());
+        String refreshToken = jwtProvider.createRefreshToken(user.getId());
+
+        Instant refreshExpiry = jwtProvider.getExpiration(refreshToken).toInstant();
+        refreshTokenService.save(user, refreshToken, refreshExpiry);
 
         return AuthResponse.builder()
                 .userId(user.getId())
@@ -138,11 +171,10 @@ public class AuthService {
                 .build();
     }
 
-    private void saveRefreshToken(User user, String token) {
-        refreshTokenRepository.save(RefreshToken.builder()
-                .user(user)
-                .token(token)
-                .expiryAt(Instant.now().plus(7, ChronoUnit.DAYS))
-                .build());
+    private String extractBearerToken(String authorizationHeader) {
+        if (authorizationHeader == null || !authorizationHeader.startsWith("Bearer ")) {
+            throw new CustomException(ErrorCode.INVALID_TOKEN);
+        }
+        return authorizationHeader.substring(7);
     }
 }

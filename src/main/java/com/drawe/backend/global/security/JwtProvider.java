@@ -1,6 +1,7 @@
-package com.drawe.backend.security;
+package com.drawe.backend.global.security;
 
 import io.jsonwebtoken.Claims;
+import io.jsonwebtoken.JwtException;
 import io.jsonwebtoken.Jwts;
 import io.jsonwebtoken.io.Decoders;
 import io.jsonwebtoken.security.Keys;
@@ -14,30 +15,29 @@ import java.util.Date;
 @Component
 public class JwtProvider {
 
-    @Value("${jwt.secret}")
-    private String secretKey;
+    private final SecretKey key;
+    private final long accessTokenExpiration;
+    private final long refreshTokenExpiration;
 
-    @Value("${jwt.access-token-expiration}")
-    private long accessTokenExpiration;
-
-    @Value("${jwt.refresh-token-expiration}")
-    private long refreshTokenExpiration;
-
-    private SecretKey key;
-
-    @PostConstruct
-    public void init() {
+    public JwtProvider(
+            @Value("${jwt.secret}") String secretKey,
+            @Value("${jwt.access-token-expiration}") long accessTokenExpiration,
+            @Value("${jwt.refresh-token-expiration}") long refreshTokenExpiration
+    ) {
         byte[] keyBytes = Decoders.BASE64.decode(secretKey);
         this.key = Keys.hmacShaKeyFor(keyBytes);
+        this.accessTokenExpiration = accessTokenExpiration;
+        this.refreshTokenExpiration = refreshTokenExpiration;
     }
 
-    public String createAccessToken(Long userId, String email) {
+    public String createAccessToken(Long userId, String email, String nickname) {
         Date now = new Date();
         Date expiry = new Date(now.getTime() + accessTokenExpiration);
 
         return Jwts.builder()
                 .subject(String.valueOf(userId))
                 .claim("email", email)
+                .claim("nickname", nickname)
                 .claim("type", "access")
                 .issuedAt(now)
                 .expiration(expiry)
@@ -66,19 +66,23 @@ public class JwtProvider {
                 .getPayload();
     }
 
-    public Long getUserId(String token) {
+    public Long getUserIdFromToken(String token) {
         return Long.parseLong(getClaims(token).getSubject());
     }
 
-    public String getEmail(String token) {
+    public String getEmailFromToken(String token) {
         return getClaims(token).get("email", String.class);
+    }
+
+    public String getNicknameFromToken(String token) {
+        return getClaims(token).get("nickname", String.class);
     }
 
     public boolean validateToken(String token) {
         try {
             getClaims(token);
             return true;
-        } catch (Exception e) {
+        } catch (JwtException | IllegalArgumentException e) {
             return false;
         }
     }

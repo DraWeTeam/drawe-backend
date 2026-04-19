@@ -1,4 +1,4 @@
-package com.drawe.backend.dto;
+package com.drawe.backend.domain.auth.dto;
 
 import java.util.Map;
 

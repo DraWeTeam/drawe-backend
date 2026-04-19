@@ -1,8 +1,10 @@
-package com.drawe.backend.service;
+package com.drawe.backend.domain.auth.service;
 
 import com.drawe.backend.domain.RefreshToken;
 import com.drawe.backend.domain.User;
-import com.drawe.backend.repository.RefreshTokenRepository;
+import com.drawe.backend.domain.auth.repository.RefreshTokenRepository;
+import com.drawe.backend.global.error.CustomException;
+import com.drawe.backend.global.error.ErrorCode;
 import org.springframework.transaction.annotation.Transactional;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -30,7 +32,7 @@ public class RefreshTokenService {
     @Transactional(readOnly = true)
     public RefreshToken findByToken(String token) {
         return refreshTokenRepository.findByToken(token)
-                .orElseThrow(() -> new IllegalArgumentException("유효하지 않은 refresh token입니다."));
+                .orElseThrow(() -> new CustomException(ErrorCode.INVALID_TOKEN));
     }
 
     @Transactional(readOnly = true)
@@ -46,6 +48,11 @@ public class RefreshTokenService {
     @Transactional
     public void deleteAllByUser(User user) {
         refreshTokenRepository.deleteAllByUser(user);
+    }
+
+    @Transactional
+    public void deleteAllByUserId(Long userId) {
+        refreshTokenRepository.deleteAllByUserId(userId);
     }
 
     @Transactional

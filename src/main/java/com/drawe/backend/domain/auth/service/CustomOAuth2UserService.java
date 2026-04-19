@@ -1,9 +1,9 @@
-package com.drawe.backend.service;
+package com.drawe.backend.domain.auth.service;
 
 import com.drawe.backend.domain.User;
-import com.drawe.backend.dto.OAuthAttributes;
-import com.drawe.backend.repository.UserRepository;
-import com.drawe.backend.security.PrincipalDetails;
+import com.drawe.backend.domain.auth.dto.OAuthAttributes;
+import com.drawe.backend.domain.auth.repository.UserRepository;
+import com.drawe.backend.global.security.PrincipalDetails;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.security.oauth2.client.userinfo.DefaultOAuth2UserService;
@@ -46,7 +46,7 @@ public class CustomOAuth2UserService implements OAuth2UserService<OAuth2UserRequ
                         User.builder()
                                 .email(attributes.getEmail())
                                 .password(null)
-                                .nickname(attributes.getNickname() != null ? attributes.getNickname() : "user")
+                                .nickname(attributes.getNickname())
                                 .picture(attributes.getPicture())
                                 .provider(attributes.getProvider())
                                 .providerId(attributes.getProviderId())

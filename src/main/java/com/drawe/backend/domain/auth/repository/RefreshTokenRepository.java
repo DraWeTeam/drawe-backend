@@ -1,4 +1,4 @@
-package com.drawe.backend.repository;
+package com.drawe.backend.domain.auth.repository;
 
 import com.drawe.backend.domain.RefreshToken;
 import com.drawe.backend.domain.User;
@@ -15,4 +15,6 @@ public interface RefreshTokenRepository extends JpaRepository<RefreshToken, Long
     void deleteByToken(String token);
 
     void deleteAllByUser(User user);
+
+    void deleteAllByUserId(Long userId);
 }

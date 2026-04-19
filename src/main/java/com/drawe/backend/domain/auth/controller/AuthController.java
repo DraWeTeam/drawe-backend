@@ -3,13 +3,19 @@ package com.drawe.backend.domain.auth.controller;
 import com.drawe.backend.domain.auth.dto.*;
 import com.drawe.backend.domain.auth.service.AuthService;
 import com.drawe.backend.global.response.ApiResponse;
+import com.drawe.backend.global.security.PrincipalDetails;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Email;
 import jakarta.validation.constraints.NotBlank;
 import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.*;
+
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
+import java.util.Map;
 
 @RestController
 @RequestMapping("/auth")
@@ -18,6 +24,12 @@ import org.springframework.web.bind.annotation.*;
 public class AuthController {
 
     private final AuthService authService;
+
+    @Value("${spring.security.oauth2.client.registration.google.client-id}")
+    private String clientId;
+
+    @Value("${spring.security.oauth2.client.registration.google.redirect-uri}")
+    private String redirectUri;
 
     @PostMapping("/signup")
     public ApiResponse<SignupResponse> signup(@Valid @RequestBody SignupRequest request) {
@@ -29,14 +41,34 @@ public class AuthController {
         return ApiResponse.success(authService.login(request));
     }
 
-    @PostMapping("/reissue")
-    public ApiResponse<TokenResponse> reissue(@Valid @RequestBody RefreshTokenRequest request) {
-        return ApiResponse.success(authService.reissue(request));
+    @GetMapping("/google")
+    public ApiResponse<Map<String, String>> getGoogleLoginUrl() {
+        String scope = URLEncoder.encode("openid email profile", StandardCharsets.UTF_8);
+
+        String googleLoginUrl =
+                "https://accounts.google.com/o/oauth2/v2/auth"
+                        + "?client_id=" + clientId
+                        + "&redirect_uri=" + URLEncoder.encode(redirectUri, StandardCharsets.UTF_8)
+                        + "&response_type=code"
+                        + "&scope=" + scope;
+
+        return ApiResponse.success(Map.of("url", googleLoginUrl));
+    }
+
+    @PostMapping("/refresh")
+    public ApiResponse<RefreshTokenResponse> refresh(@Valid @RequestBody RefreshTokenRequest request) {
+        return ApiResponse.success(authService.refresh(request) );
     }
 
     @PostMapping("/logout")
-    public ApiResponse<Void> logout(@AuthenticationPrincipal Long userId) {
-        authService.logout(userId);
+    public ApiResponse<Void> logout(@Valid @RequestBody RefreshTokenRequest request) {
+        authService.logout(request);
+        return ApiResponse.success();
+    }
+
+    @PostMapping("/logout/all")
+    public ApiResponse<Void> logoutAll(@RequestHeader("Authorization") String authorizationHeader) {
+        authService.logoutAll(authorizationHeader);
         return ApiResponse.success();
     }
 
@@ -54,9 +86,9 @@ public class AuthController {
 
     @PostMapping("/check-password")
     public ApiResponse<Void> checkPassword(
-            @AuthenticationPrincipal Long userId,
+            @AuthenticationPrincipal PrincipalDetails principalDetails,
             @Valid @RequestBody PasswordCheckRequest request) {
-        authService.checkPassword(userId, request);
+        authService.checkPassword(principalDetails.getUser().getId(), request);
         return ApiResponse.success();
     }
 }

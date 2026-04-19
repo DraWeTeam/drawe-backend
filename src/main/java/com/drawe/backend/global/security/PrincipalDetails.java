@@ -1,9 +1,7 @@
-package com.drawe.backend.security;
+package com.drawe.backend.global.security;
 
 import com.drawe.backend.domain.User;
 import lombok.Getter;
-import org.jspecify.annotations.NullMarked;
-import org.jspecify.annotations.Nullable;
 import org.springframework.security.core.GrantedAuthority;
 import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.security.oauth2.core.user.OAuth2User;
@@ -31,24 +29,21 @@ public class PrincipalDetails implements UserDetails, OAuth2User {
     }
 
     @Override
-    @NullMarked
     public Collection<? extends GrantedAuthority> getAuthorities() {
         return Collections.emptyList();
     }
 
     @Override
-    public @Nullable String getPassword() {
+    public String getPassword() {
         return user.getPassword();
     }
 
     @Override
-    @NullMarked
     public String getUsername() {
         return user.getEmail();
     }
 
     @Override
-    @NullMarked
     public String getName() {
         return user.getEmail();
     }
@@ -59,25 +54,21 @@ public class PrincipalDetails implements UserDetails, OAuth2User {
     }
 
     @Override
-    @NullMarked
     public boolean isAccountNonLocked() {
         return true;
     }
 
     @Override
-    @NullMarked
     public boolean isAccountNonExpired() {
         return true;
     }
 
     @Override
-    @NullMarked
     public boolean isCredentialsNonExpired() {
         return true;
     }
 
     @Override
-    @NullMarked
     public boolean isEnabled() {
         return true;
     }
