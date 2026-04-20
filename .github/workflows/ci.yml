@@ -1,0 +1,32 @@
+name: Backend CI
+
+on:
+  pull_request:
+    branches: [develop, main]
+
+jobs:
+  ci:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+          cache: 'gradle'
+
+      - name: Grant execute permission for gradlew
+        run: chmod +x gradlew
+
+      - name: Lint (Checkstyle)
+        run: ./gradlew checkstyleMain checkstyleTest
+
+      - name: Format check (Spotless)
+        run: ./gradlew spotlessCheck
+
+      - name: Build
+        run: ./gradlew build -x test

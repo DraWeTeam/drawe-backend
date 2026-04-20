@@ -6,5 +6,5 @@ import lombok.Getter;
 @Getter
 @AllArgsConstructor
 public class CheckAvailabilityResponse {
-    private boolean available;
+  private boolean available;
 }

@@ -9,10 +9,10 @@ import lombok.Getter;
 @AllArgsConstructor
 public class AuthResponse {
 
-    private Long userId;
-    private String accessToken;
-    private String refreshToken;
-    private String email;
-    private String nickname;
-    private String provider;
+  private Long userId;
+  private String accessToken;
+  private String refreshToken;
+  private String email;
+  private String nickname;
+  private String provider;
 }
