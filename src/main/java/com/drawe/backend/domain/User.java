@@ -3,10 +3,9 @@ package com.drawe.backend.domain;
 import jakarta.persistence.*;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Size;
+import java.time.Instant;
 import lombok.*;
 import org.hibernate.annotations.CreationTimestamp;
-
-import java.time.Instant;
 
 @Getter
 @Setter
@@ -14,53 +13,53 @@ import java.time.Instant;
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
 @AllArgsConstructor
 @Builder
-@Table(name = "users",
-        indexes = {
-        @Index(name = "idx_user_prov_pid", columnList = "provider, provider_id")})
+@Table(
+    name = "users",
+    indexes = {@Index(name = "idx_user_prov_pid", columnList = "provider, provider_id")})
 public class User {
-    @Id
-    @GeneratedValue(strategy = GenerationType.IDENTITY)
-    @Column(name = "id", nullable = false)
-    private Long id;
+  @Id
+  @GeneratedValue(strategy = GenerationType.IDENTITY)
+  @Column(name = "id", nullable = false)
+  private Long id;
 
-    @Size(max = 255)
-    @NotNull
-    @Column(name = "email", nullable = false, unique = true)
-    private String email;
+  @Size(max = 255)
+  @NotNull
+  @Column(name = "email", nullable = false, unique = true)
+  private String email;
 
-    //OAuth 유저는 null
-    @Size(max = 255)
-    @Column(name = "password")
-    private String password;
+  // OAuth 유저는 null
+  @Size(max = 255)
+  @Column(name = "password")
+  private String password;
 
-    @Size(max = 100)
-    @NotNull
-    @Column(name = "nickname", nullable = false, length = 100)
-    private String nickname;
+  @Size(max = 100)
+  @NotNull
+  @Column(name = "nickname", nullable = false, length = 100)
+  private String nickname;
 
-    @Column(length = 500)
-    private String picture;
+  @Column(length = 500)
+  private String picture;
 
-    //null(일반) / google
-    @Size(max = 20)
-    @Column(name = "provider", length = 20)
-    private String provider;
+  // null(일반) / google
+  @Size(max = 20)
+  @Column(name = "provider", length = 20)
+  private String provider;
 
-    @Size(max = 100)
-    @Column(name = "provider_id", length = 100)
-    private String providerId;
+  @Size(max = 100)
+  @Column(name = "provider_id", length = 100)
+  private String providerId;
 
-    @CreationTimestamp
-    @Column(name = "created_at", updatable = false)
-    private Instant createdAt;
+  @CreationTimestamp
+  @Column(name = "created_at", updatable = false)
+  private Instant createdAt;
 
-    public void updateProfile(String nickname, String picture){
-        this.nickname = nickname;
-        this.picture = picture;
-    }
+  public void updateProfile(String nickname, String picture) {
+    this.nickname = nickname;
+    this.picture = picture;
+  }
 
-    public void updateOAuthInfo(String provider, String providerId) {
-        this.provider = provider;
-        this.providerId = providerId;
-    }
+  public void updateOAuthInfo(String provider, String providerId) {
+    this.provider = provider;
+    this.providerId = providerId;
+  }
 }

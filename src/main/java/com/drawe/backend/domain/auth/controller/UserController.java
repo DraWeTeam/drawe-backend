@@ -10,15 +10,13 @@ import org.springframework.web.bind.annotation.RestController;
 @RestController
 public class UserController {
 
-    @GetMapping("/user/profile")
-    public ApiResponse<MyProfileResponse> me(@AuthenticationPrincipal PrincipalDetails user) {
-        return ApiResponse.success(
-                new MyProfileResponse(
-                        user.getUser().getId(),
-                        user.getUser().getEmail(),
-                        user.getUser().getNickname(),
-                        user.getUser().getPicture()
-                )
-        );
-    }
+  @GetMapping("/user/profile")
+  public ApiResponse<MyProfileResponse> me(@AuthenticationPrincipal PrincipalDetails user) {
+    return ApiResponse.success(
+        new MyProfileResponse(
+            user.getUser().getId(),
+            user.getUser().getEmail(),
+            user.getUser().getNickname(),
+            user.getUser().getPicture()));
+  }
 }
