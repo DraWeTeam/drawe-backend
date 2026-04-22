@@ -40,3 +40,6 @@ out/
 /src/main/resources/application-oauth.properties
 
 /src/main/resources/application.properties
+
+### 환경 변수 ###
+.env
