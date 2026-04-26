@@ -41,5 +41,8 @@ out/
 
 /src/main/resources/application.properties
 
+### LLM ###
+/src/main/resources/application-llm.properties
+
 ### 환경 변수 ###
 .env
