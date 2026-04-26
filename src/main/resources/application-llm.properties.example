@@ -1,0 +1,17 @@
+# LLM Provider Settings
+# 실제 키를 application-llm.properties 에 채우고 이 파일은 템플릿으로만 둔다.
+
+# Gemini (Google AI Studio)
+llm.gemini.api-key=YOUR_GEMINI_API_KEY
+llm.gemini.model=gemini-2.0-flash
+llm.gemini.base-url=https://generativelanguage.googleapis.com/v1beta
+
+# Grok (xAI)
+llm.grok.api-key=YOUR_GROK_API_KEY
+llm.grok.model=grok-2-vision-1212
+llm.grok.base-url=https://api.x.ai/v1
+
+# 공통 옵션
+llm.timeout-ms=60000
+llm.max-history=20
+llm.default-provider=gemini
