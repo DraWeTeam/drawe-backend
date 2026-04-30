@@ -77,10 +77,7 @@ public class ClaudeService implements LlmService {
       }
       messages.add(
           Map.of(
-              "role",
-              t.role() == MessageRole.USER ? "user" : "assistant",
-              "content",
-              t.content()));
+              "role", t.role() == MessageRole.USER ? "user" : "assistant", "content", t.content()));
     }
 
     // 새 user 메시지 (이미지 있으면 멀티모달 블록)
@@ -145,8 +142,7 @@ public class ClaudeService implements LlmService {
       Object created = u.get("cache_creation_input_tokens");
       Object read = u.get("cache_read_input_tokens");
       Object input = u.get("input_tokens");
-      log.debug(
-          "Claude usage - input={}, cache_created={}, cache_read={}", input, created, read);
+      log.debug("Claude usage - input={}, cache_created={}, cache_read={}", input, created, read);
     }
   }
 }

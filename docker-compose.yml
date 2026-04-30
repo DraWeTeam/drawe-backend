@@ -1,21 +1,31 @@
 services:
   backend:
     build: .
+    env_file:
+      - .env
+    environment:
+      - DB_HOST=drawe_db
+      - REDIS_HOST=drawe_redis
     ports:
       - "8080:8080"
     networks:
       - app-network
+      - default
     depends_on:
       drawe_db:
         condition: service_healthy
+      drawe_redis:                       
+        condition: service_healthy       
 
   drawe_db:
     image: mysql:8
     ports:
-      - "3309:3306"
+      - "127.0.0.1:3309:3306"
     environment:
       - MYSQL_ROOT_PASSWORD=${MYSQL_ROOT_PASSWORD}
       - MYSQL_DATABASE=drawe_db
+      - MYSQL_USER=${DB_USERNAME}       
+      - MYSQL_PASSWORD=${DB_PASSWORD}
     volumes:
       - mysql-data:/var/lib/mysql
     networks:
@@ -25,8 +35,34 @@ services:
       interval: 5s
       retries: 10
 
+  drawe_redis:
+    image: valkey/valkey:8.1.6-alpine
+    ports:
+      - "127.0.0.1:6379:6379"
+    command: ["valkey-server", "--requirepass", "${REDIS_PASSWORD}"]
+    healthcheck:
+      test: ["CMD", "valkey-cli", "-a", "${REDIS_PASSWORD}", "PING"]
+      interval: 5s
+      retries: 10
+  
+  caddy:
+    image: caddy:2
+    profiles: ["domain"]    # ← 도메인 붙일 때만 활성화
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - backend
+
 volumes:
   mysql-data:
+  caddy_data:
+  caddy_config:
 
 networks:
   app-network:

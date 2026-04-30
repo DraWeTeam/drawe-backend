@@ -39,8 +39,6 @@ out/
 ### OAuth ###
 /src/main/resources/application-oauth.properties
 
-/src/main/resources/application.properties
-
 ### LLM ###
 /src/main/resources/application-llm.properties
 

@@ -1,0 +1,7 @@
+{
+    email drawe3648@gmail.com
+}
+
+{$DOMAIN_NAME} {
+    reverse_proxy backend:8080
+}
