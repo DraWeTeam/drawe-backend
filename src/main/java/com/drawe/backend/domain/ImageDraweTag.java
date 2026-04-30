@@ -41,6 +41,10 @@ public class ImageDraweTag {
   @Column(name = "mood", length = 30)
   private String mood;
 
+  @Column(name = "utility")
+  @JdbcTypeCode(SqlTypes.JSON)
+  private List<String> utility;
+
   @Column(name = "free_tags")
   @JdbcTypeCode(SqlTypes.JSON)
   private List<String> freeTags;
