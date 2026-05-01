@@ -67,3 +67,4 @@ volumes:
 networks:
   app-network:
     external: true
+    #driver: bridge # external:true 사용 불가한 경우, driver: bridge 사용
