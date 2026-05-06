@@ -3,6 +3,7 @@ package com.drawe.backend.domain;
 import com.drawe.backend.domain.enums.LlmCallStatus;
 import com.drawe.backend.domain.enums.LlmProvider;
 import com.drawe.backend.domain.enums.MessageRole;
+import com.drawe.backend.domain.llm.dto.ChatResponse;
 import jakarta.persistence.*;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Size;
@@ -56,20 +57,21 @@ public class LlmMessage {
   @ColumnDefault("false")
   private Boolean hasImage = false;
 
-  // Phase 2: Cloudinary URL
   @Size(max = 500)
   @Column(name = "image_url", length = 500)
   private String imageUrl;
 
-  // Phase 3: Pinecone embedding ID
   @Size(max = 100)
   @Column(name = "embedding_id", length = 100)
   private String embeddingId;
 
-  // Phase 3: 검색된 레퍼런스 이미지 ID 목록
   @Column(name = "reference_ids")
   @JdbcTypeCode(SqlTypes.JSON)
   private List<Long> referenceIds;
+
+  @Column(name = "references_json")
+  @JdbcTypeCode(SqlTypes.JSON)
+  private List<ChatResponse.ReferenceItem> references;
 
   @Column(name = "latency_ms")
   private Integer latencyMs;

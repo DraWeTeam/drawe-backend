@@ -7,9 +7,9 @@ import java.util.List;
 
 public record ChatHistoryResponse(String sessionId, List<HistoryItem> messages) {
 
-  public record HistoryItem(String role, String content, Instant createdAt) {
+  public record HistoryItem(String role, String content, List<ChatResponse.ReferenceItem> references,Instant createdAt) {
     public static HistoryItem from(LlmMessage m) {
-      return new HistoryItem(roleName(m.getRole()), m.getContent(), m.getCreatedAt());
+      return new HistoryItem(roleName(m.getRole()), m.getContent(), m.getReferences(), m.getCreatedAt());
     }
 
     private static String roleName(MessageRole role) {
