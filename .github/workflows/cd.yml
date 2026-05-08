@@ -1,0 +1,148 @@
+name: Backend CD
+
+# 트리거:
+#   develop 브랜치 push        → dev 환경 자동 배포
+#   main    브랜치 push        → prod 환경 자동 배포 (GitHub Environment Required reviewers 통과 후)
+#   workflow_dispatch (수동)   → environment 입력값으로 명시 선택
+#                                ⚠ prod 선택해도 main 외 브랜치에서 trigger 시 IAM trust 단계에서 거부됨
+#                                  (terraform-prod 의 OIDC trust 가 refs/heads/main 만 허용)
+#
+# 배포 흐름:
+#   1. JAR 빌드
+#   2. Docker 이미지 빌드 & ECR push (SHA + latest 두 태그)
+#   3. 현재 active TD 조회 → image 만 새 SHA 로 갱신 → 새 TD revision 등록
+#   4. ECS service 를 새 TD 로 업데이트
+#   5. services-stable 대기 — Circuit Breaker 가 헬스체크 실패 감지 시 자동 롤백
+on:
+  push:
+    branches: [develop, main]
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Deploy target (수동 trigger 시에만 사용)'
+        required: true
+        type: choice
+        options: [dev, prod]
+        default: dev
+
+permissions:
+  id-token: write       # AWS OIDC 토큰 발급용
+  contents: read
+
+jobs:
+  # ── ENV_NAME 결정 ──
+  # workflow_dispatch:    inputs.environment 가 우선
+  # push to main:         prod
+  # push to develop:      dev
+  resolve-env:
+    runs-on: ubuntu-latest
+    outputs:
+      env_name: ${{ steps.resolve.outputs.env_name }}
+    steps:
+      - id: resolve
+        run: |
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            echo "env_name=${{ github.event.inputs.environment }}" >> $GITHUB_OUTPUT
+          elif [[ "${{ github.ref }}" == "refs/heads/main" ]]; then
+            echo "env_name=prod" >> $GITHUB_OUTPUT
+          else
+            echo "env_name=dev" >> $GITHUB_OUTPUT
+          fi
+
+  deploy:
+    needs: resolve-env
+    runs-on: ubuntu-latest
+    environment: ${{ needs.resolve-env.outputs.env_name }}
+
+    env:
+      AWS_REGION: ap-northeast-2
+      ENV_NAME: ${{ needs.resolve-env.outputs.env_name }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+          cache: 'gradle'
+
+      - name: Build JAR
+        run: |
+          chmod +x gradlew
+          ./gradlew bootJar -x test
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::${{ secrets.AWS_ACCOUNT_ID }}:role/drawe-${{ env.ENV_NAME }}-github-deploy-role
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        id: ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build & push Docker image
+        id: build
+        env:
+          REGISTRY: ${{ steps.ecr.outputs.registry }}
+          REPO: drawe-${{ env.ENV_NAME }}-backend
+          TAG: ${{ github.sha }}
+        run: |
+          docker buildx build \
+              --platform linux/arm64 \
+              --tag $REGISTRY/$REPO:$TAG \
+              --tag $REGISTRY/$REPO:latest \
+              --push \
+              .
+          echo "image_uri=$REGISTRY/$REPO:$TAG" >> $GITHUB_OUTPUT
+
+      - name: Register new task definition with SHA tag
+        id: register-td
+        env:
+          SERVICE: drawe-${{ env.ENV_NAME }}-backend
+          CONTAINER_NAME: drawe-${{ env.ENV_NAME }}-backend
+          IMAGE_URI: ${{ steps.build.outputs.image_uri }}
+        run: |
+          aws ecs describe-task-definition \
+              --task-definition $SERVICE \
+              --region $AWS_REGION \
+              --query 'taskDefinition' > td.json
+
+          jq --arg img "$IMAGE_URI" --arg name "$CONTAINER_NAME" \
+              '.containerDefinitions |= map(if .name == $name then .image = $img else . end) |
+               del(.taskDefinitionArn, .revision, .status, .requiresAttributes,
+                   .compatibilities, .registeredAt, .registeredBy)' \
+              td.json > td-new.json
+
+          NEW_TD_ARN=$(aws ecs register-task-definition \
+              --cli-input-json file://td-new.json \
+              --region $AWS_REGION \
+              --query 'taskDefinition.taskDefinitionArn' --output text)
+
+          echo "td_arn=$NEW_TD_ARN" >> $GITHUB_OUTPUT
+          echo "✅ New TD registered: $NEW_TD_ARN"
+
+      - name: Update ECS service to new task definition
+        run: |
+          aws ecs update-service \
+              --cluster drawe-${{ env.ENV_NAME }}-cluster \
+              --service drawe-${{ env.ENV_NAME }}-backend \
+              --task-definition ${{ steps.register-td.outputs.td_arn }} \
+              --region $AWS_REGION
+
+      - name: Wait for deployment to stabilize
+        run: |
+          aws ecs wait services-stable \
+              --cluster drawe-${{ env.ENV_NAME }}-cluster \
+              --services drawe-${{ env.ENV_NAME }}-backend \
+              --region $AWS_REGION
+          echo "✅ Deployment stable. New revision: ${{ steps.register-td.outputs.td_arn }}"
