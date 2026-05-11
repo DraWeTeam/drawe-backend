@@ -9,6 +9,7 @@ public record ChatResponse(
     String type,
     String message,
     List<ReferenceItem> references,
+    String referencesAction,
     String followUp) {
 
   public record ReferenceItem(
@@ -19,5 +20,6 @@ public record ChatResponse(
       String technique,
       String subject,
       String mood,
-      Double similarity) {}
+      Double similarity,
+      String source ) {}
 }

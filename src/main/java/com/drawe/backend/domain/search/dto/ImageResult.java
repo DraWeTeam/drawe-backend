@@ -14,4 +14,5 @@ public record ImageResult(
     String mood,
     List<String> utility,
     List<String> freeTags,
-    List<String> rawTags) {}
+    List<String> rawTags,
+    String source ) {}

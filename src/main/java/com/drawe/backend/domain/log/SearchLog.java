@@ -7,6 +7,8 @@ import java.time.Instant;
 import lombok.Getter;
 import lombok.Setter;
 import org.hibernate.annotations.CreationTimestamp;
+import org.hibernate.annotations.OnDelete;
+import org.hibernate.annotations.OnDeleteAction;
 
 @Getter
 @Setter
@@ -29,7 +31,8 @@ public class SearchLog {
   private User user;
 
   @ManyToOne(fetch = FetchType.LAZY)
-  @JoinColumn(name = "project_id")
+  @JoinColumn(name = "project_id", nullable = true)
+  @OnDelete(action = OnDeleteAction.SET_NULL)
   private Project project;
 
   @Column(name = "original_message", length = 1000)

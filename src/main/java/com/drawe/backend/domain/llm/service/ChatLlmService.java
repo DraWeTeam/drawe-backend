@@ -8,11 +8,7 @@ import com.drawe.backend.domain.enums.LlmCallStatus;
 import com.drawe.backend.domain.enums.LlmProvider;
 import com.drawe.backend.domain.enums.MessageRole;
 import com.drawe.backend.domain.enums.UserPlan;
-import com.drawe.backend.domain.llm.dto.ChatHistoryResponse;
-import com.drawe.backend.domain.llm.dto.ChatRequest;
-import com.drawe.backend.domain.llm.dto.ChatResponse;
-import com.drawe.backend.domain.llm.dto.LlmCallContext;
-import com.drawe.backend.domain.llm.dto.LlmCallResult;
+import com.drawe.backend.domain.llm.dto.*;
 import com.drawe.backend.domain.llm.repository.ChatSessionRepository;
 import com.drawe.backend.domain.llm.repository.LlmMessageRepository;
 import com.drawe.backend.domain.log.SearchLogService;
@@ -51,68 +47,132 @@ public class ChatLlmService {
   private final SearchService searchService;
   private final SearchLogService searchLogService;
 
-  @Transactional
-  public ChatResponse chat(User user, Long projectId, ChatRequest request) {
-    Project project = loadProjectAuthorized(user, projectId);
-    ChatSession session = resolveOrCreateSession(user, project, request.sessionId());
-    ImageInputResolver.Resolved image = imageInputResolver.resolve(request.imageUrl());
+    @Transactional
+    public ChatResponse chat(User user, Long projectId, ChatRequest request) {
+        Project project = loadProjectAuthorized(user, projectId);
+        ChatSession session = resolveOrCreateSession(user, project, request.sessionId());
 
-    // history 먼저
-    List<LlmMessage> all = llmMessageRepository.findByChatSessionOrderByCreatedAtAsc(session);
-    List<LlmCallContext.Turn> history = trimHistory(all, llmProperties.getMaxHistory());
+        ImageInputResolver.Resolved image = imageInputResolver.resolve(request.imageUrl());
 
-    // history를 reference에 전달
-    List<ImageResult> references = retrieveReferences(user, project, request.message(), history);
+        // 히스토리 먼저 로드 (검색 결정에 사용)
+        List<LlmMessage> all = llmMessageRepository.findByChatSessionOrderByCreatedAtAsc(session);
+        List<LlmCallContext.Turn> history = trimHistory(all, llmProperties.getMaxHistory());
 
-    // 레퍼런스 검색 결과를 system 컨텍스트에 추가
-    if (!references.isEmpty()) {
-      String referenceContext = buildReferenceContext(references);
-      history.add(new LlmCallContext.Turn(MessageRole.SYSTEM, referenceContext));
+        // 검색 결정 + references 처리
+        ExtractionResult decision = keywordExtractor.extract(request.message(), history);
+        List<ImageResult> references = handleSearchDecision(
+                user, project, request.message(), decision);
+
+        // references context 추가
+        if (!references.isEmpty()) {
+            String referenceContext = buildReferenceContext(references);
+            history.add(new LlmCallContext.Turn(MessageRole.SYSTEM, referenceContext));
+        } else {
+            // 추가 — references 없을 때 명시
+            history.add(new LlmCallContext.Turn(
+                    MessageRole.SYSTEM,
+                    "[참고 이미지 안내]\n" +
+                            "이번 답변에는 새로 검색된 참고 이미지가 없습니다.\n" +
+                            "사용자의 질문에 직접 답변하세요.\n" +
+                            "[1], [2] 같은 이미지 인용 표현을 사용하지 마세요.\n" +
+                            "이전 대화에서 언급된 이미지가 있다면 그것만 참고 가능하지만, " +
+                            "새 인용을 만들지 마세요."
+            ));
+        }
+
+
+        LlmProvider provider = resolveProvider(user);
+        LlmService llm = pickService(provider);
+        LlmCallContext ctx =
+                new LlmCallContext(history, request.message(), image.bytes(), image.mimeType());
+
+        // 사용자 메시지 저장
+        LlmMessage userMsg = new LlmMessage();
+        userMsg.setChatSession(session);
+        userMsg.setRole(MessageRole.USER);
+        userMsg.setContent(request.message());
+        userMsg.setHasImage(image.hasImage());
+        userMsg.setImageUrl(image.hasImage() ? "(base64-data)" : null);
+        llmMessageRepository.save(userMsg);
+
+        LlmMessage assistantMsg = new LlmMessage();
+        assistantMsg.setChatSession(session);
+        assistantMsg.setRole(MessageRole.ASSISTANT);
+        assistantMsg.setProvider(provider);
+        assistantMsg.setHasImage(false);
+
+        try {
+            LlmCallResult result = llm.generate(ctx);
+            assistantMsg.setContent(result.content());
+            assistantMsg.setModel(result.model());
+            assistantMsg.setLatencyMs(result.latencyMs());
+            assistantMsg.setStatus(LlmCallStatus.SUCCESS);
+
+            // references 저장 — 추가
+            List<ChatResponse.ReferenceItem> refItems = convertToReferenceItems(references);
+            if (!refItems.isEmpty()) {
+                assistantMsg.setReferences(refItems);
+            }
+
+            llmMessageRepository.save(assistantMsg);
+            session.setLastActive(Instant.now());
+
+            return new ChatResponse(
+                    session.getId(),
+                    "guide",
+                    result.content(),
+                    convertToReferenceItems(references),
+                    decision.action().name(),  // "NEW_SEARCH" | "KEEP" | "SKIP"
+                    null
+            );
+        } catch (CustomException e) {
+            persistFailure(assistantMsg, e);
+            throw e;
+        } catch (Exception e) {
+            log.error("LLM 호출 실패 session={} provider={}", session.getId(), provider, e);
+            persistFailure(assistantMsg, e);
+            throw new CustomException(ErrorCode.AI_SERVICE_ERROR);
+        }
     }
 
-    LlmProvider provider = resolveProvider(user);
-    LlmService llm = pickService(provider);
-    LlmCallContext ctx =
-        new LlmCallContext(history, request.message(), image.bytes(), image.mimeType());
+    private List<ImageResult> handleSearchDecision(
+            User user, Project project, String message, ExtractionResult decision) {
 
-    // 사용자 메시지 저장 (LLM 호출 전: 실패해도 발화는 남김)
-    LlmMessage userMsg = new LlmMessage();
-    userMsg.setChatSession(session);
-    userMsg.setRole(MessageRole.USER);
-    userMsg.setContent(request.message());
-    userMsg.setHasImage(image.hasImage());
-    userMsg.setImageUrl(image.hasImage() ? "(base64-data)" : null);
-    llmMessageRepository.save(userMsg);
+        switch (decision.action()) {
+            case NEW_SEARCH:
+                try {
+                    SearchResponse result = searchService.search(
+                            new SearchRequest(decision.keywords(), 6)
+                    );
+                    searchLogService.log(user, project, message, decision.keywords(),
+                            result.results(), "rag_chat");
 
-    LlmMessage assistantMsg = new LlmMessage();
-    assistantMsg.setChatSession(session);
-    assistantMsg.setRole(MessageRole.ASSISTANT);
-    assistantMsg.setProvider(provider);
-    assistantMsg.setHasImage(false);
+                    // 안전장치: 평균 점수 낮으면 무관 결과로 판단
+                    double avgScore = result.results().stream()
+                            .mapToDouble(r -> r.score().doubleValue())
+                            .average()
+                            .orElse(0.0);
 
-    try {
-      LlmCallResult result = llm.generate(ctx);
-      assistantMsg.setContent(result.content());
-      assistantMsg.setModel(result.model());
-      assistantMsg.setLatencyMs(result.latencyMs());
-      assistantMsg.setStatus(LlmCallStatus.SUCCESS);
+                    if (avgScore < 0.18) {
+                        log.info("검색 결과 점수 낮음 (avgScore={}), 무관 결과로 판단", avgScore);
+                        return List.of();
+                    }
 
-      List<ChatResponse.ReferenceItem> refItems = convertToReferenceItems(references);
-      assistantMsg.setReferences(refItems);
+                    log.info("새 references {}개 (avgScore={})",
+                            result.results().size(),
+                            String.format("%.2f", avgScore));
+                    return result.results();
+                } catch (Exception e) {
+                    log.warn("검색 실패: {}", e.getMessage());
+                    return List.of();
+                }
 
-      llmMessageRepository.save(assistantMsg);
-      session.setLastActive(Instant.now());
-
-      return new ChatResponse(session.getId(), "guide", result.content(), refItems, null);
-    } catch (CustomException e) {
-      persistFailure(assistantMsg, e);
-      throw e;
-    } catch (Exception e) {
-      log.error("LLM call failed for session={} provider={}", session.getId(), provider, e);
-      persistFailure(assistantMsg, e);
-      throw new CustomException(ErrorCode.AI_SERVICE_ERROR);
+            case KEEP:
+            case SKIP:
+            default:
+                return List.of();
+        }
     }
-  }
 
   @Transactional(readOnly = true)
   public ChatHistoryResponse getHistory(User user, Long projectId, String sessionId) {
@@ -275,42 +335,6 @@ public class ChatLlmService {
     return msg.length() > 1000 ? msg.substring(0, 1000) : msg;
   }
 
-  /** 사용자 메시지에서 키워드를 추출하고 이미지 검색 수행 검색이 불필요하거나 실패하면 빈 리스트 반환 (가이드 응답에 영향 없음). */
-  private List<ImageResult> retrieveReferences(
-      User user, Project project, String userMessage, List<LlmCallContext.Turn> recentHistory) {
-    String keywords = keywordExtractor.extract(userMessage, recentHistory);
-    if (keywords.isEmpty()) {
-      return List.of();
-    }
-
-    try {
-      SearchResponse searchResult = searchService.search(new SearchRequest(keywords, 6));
-      log.info("RAG 검색: keywords='{}', 결과={}개", keywords, searchResult.results().size());
-
-      // 로그 저장 (비동기)
-      searchLogService.log(
-          user, project, userMessage, keywords, searchResult.results(), "rag_chat");
-
-      // 평균 점수 계산
-      double avgScore =
-          searchResult.results().stream()
-              .mapToDouble(r -> r.score().doubleValue())
-              .average()
-              .orElse(0.0);
-
-      // 점수 너무 낮으면 무관한 결과로 판단
-      if (avgScore < 0.18) {
-        log.info("검색 결과 점수 낮음 (avgScore={}), 무관한 결과로 판단", avgScore);
-        return List.of(); // 빈 배열 → 프론트에서 이전 references 유지
-      }
-
-      return searchResult.results();
-    } catch (Exception e) {
-      log.warn("RAG 검색 실패, references 없이 응답: error={}", e.getMessage());
-      return List.of();
-    }
-  }
-
   /** 검색 결과를 LLM에게 줄 system 메시지로 포맷팅 LLM이 응답에서 [1], [2] 형식으로 인용하도록 지시. */
   private String buildReferenceContext(List<ImageResult> references) {
     StringBuilder sb = new StringBuilder();
@@ -373,7 +397,9 @@ public class ChatLlmService {
                     r.technique(),
                     r.subject(),
                     r.mood(),
-                    r.score().doubleValue()))
+                    r.score().doubleValue(),
+                    r.source()
+                ))
         .toList();
   }
 }

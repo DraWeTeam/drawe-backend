@@ -2,6 +2,7 @@ package com.drawe.backend.domain.llm.service;
 
 import com.drawe.backend.domain.enums.LlmProvider;
 import com.drawe.backend.domain.enums.MessageRole;
+import com.drawe.backend.domain.llm.dto.ExtractionResult;
 import com.drawe.backend.domain.llm.dto.LlmCallContext;
 import com.drawe.backend.domain.llm.dto.LlmCallResult;
 import java.util.ArrayList;
@@ -15,124 +16,178 @@ import org.springframework.stereotype.Component;
 @RequiredArgsConstructor
 public class KeywordExtractor {
 
-  private static final String SYSTEM_PROMPT =
-      """
-            You are a keyword extractor for an image search system using CLIP embeddings.
+    private static final String SYSTEM_PROMPT = """
+    You are a search decision system for a drawing reference image search.
+    
+    Read the user's message AND recent conversation history.
+    Decide ONE of three actions:
+    
+    ## 1. NEW_SEARCH: <english keywords>
+    
+    User wants new or additional reference images.
+    Fetch fresh references from the search engine.
+    
+    Signals:
+    - New noun/subject not in previous conversation
+    - Mood/style change ("이번엔", "다른 분위기", "바꿔")
+    - Starting fresh ("처음부터", "새로")
+    - Explicit reference request:
+      * "다른 거 보여줘", "더 보여줘", "또 보여줘"
+      * "비슷한 거 더", "추가로 보여줘", "다른 이미지"
+      * "다른 레퍼런스", "더 찾아줘", "참고 이미지"
+      * "another", "more", "show me other"
+    
+    For "more/additional" requests, use previous keywords but with slight variation
+    to ensure diversity in new results.
+    
+    Output 3-6 English keywords. Translate from any language.
+    Abstract to broad visual concepts CLIP can match (mood, style, scene).
+    Avoid specific pose details (CLIP can't match them well).
+    
+    ## 2. KEEP
+    
+    User continues current topic with detail/refinement questions about the
+    existing references or drawing.
+    
+    Signals:
+    - Detail technique questions ("어떻게 그려?", "방법", "그림자", "음영")
+    - Refinement of existing answer ("더 자세히", "더 진하게", "조금 다르게")
+    - Specific part question ("이 부분", "여기", "이거")
+    - User's own drawing context ("내가 그린", "지금 상태")
+    - Color codes, anatomy, hex values
+    - Pose details (hand position, finger angles, etc.) — CLIP can't help
+    - Pronouns referring to previous context
+    - Questions about specific previous reference ([N]번 이미지)
+    
+    IMPORTANT: Distinguish carefully:
+    - "더 자세히 알려줘" → KEEP (refinement of existing answer)
+    - "더 보여줘" → NEW_SEARCH (asking for more images)
+    - "다른 방법으로 설명해줘" → KEEP (refinement)
+    - "다른 거 보여줘" → NEW_SEARCH (different images)
+    
+    ## 3. SKIP
+    
+    No visual reference needed at all.
+    
+    Signals:
+    - Greetings, thanks ("안녕", "고마워", "도움됐어")
+    - Abstract theory ("보색이 뭐야", "RGB CMYK 차이")
+    - Meta questions ("어떻게 사용해", "너 누구야")
+    
+    ---
+    
+    Output format: EXACTLY one line, no quotes, no extra text.
+    - NEW_SEARCH: cherry blossoms spring landscape
+    - KEEP
+    - SKIP
+    
+    ---
+    
+    Examples:
+    
+    History: (empty)
+    User: "벚꽃이 핀 봄 풍경 그리고 싶어요"
+    → NEW_SEARCH: cherry blossoms spring landscape
+    
+    History: cherry blossoms topic
+    User: "분홍색 그라데이션 어떻게 넣어요?"
+    → KEEP
+    
+    History: cherry blossoms topic
+    User: "이번엔 가을 단풍 그려볼까요"
+    → NEW_SEARCH: autumn maple leaves landscape
+    
+    History: cherry blossoms topic
+    User: "다른 레퍼런스 더 보여줘"
+    → NEW_SEARCH: spring flowers blossoms nature
+    
+    History: cherry blossoms topic
+    User: "더 자세히 설명해줘"
+    → KEEP
+    
+    History: portrait drawing
+    User: "백발 캐릭터 가슴 그림자 어떻게 넣을까?"
+    → KEEP
+    
+    History: portrait drawing
+    User: "구도 좀 더 자세히 — 왼팔 들고 오른손은 허리에"
+    → KEEP
+    
+    History: portrait drawing
+    User: "이 [4]번 이미지 보색은 뭐야?"
+    → KEEP
+    
+    History: portrait drawing
+    User: "비슷한 인물 사진 더 보여줘"
+    → NEW_SEARCH: portrait person photography
+    
+    History: (any)
+    User: "고마워"
+    → SKIP
+    
+    History: (any)
+    User: "RGB와 CMYK 차이가 뭐야?"
+    → SKIP
+    """;
 
-            Your task: Read the user's message (in any language) considering the
-            conversation context. Extract 3-6 English keywords that best match
-            the user's intent for finding visual reference images.
+    private final List<LlmService> llmServices;
 
-            Rules:
-            1. Output ONLY the keywords, separated by spaces. No quotes, no explanations.
-            2. Convert any non-English input to natural English keywords.
-            3. Focus on visual elements: subjects, scenes, moods, lighting,
-               colors, styles, poses, actions.
-            4. Use conversation context to disambiguate.
-               The user often refers to previous messages.
-            5. CAREFUL with Korean homophones — choose meaning based on visual/action context:
-               - 쥐다 (to grasp/hold) vs 쥐 (mouse animal):
-                 if discussing hands or poses → "grasping/holding"
-               - 손 (hand) vs 손님 (guest): default to body part unless context says otherwise
-               - 눈 (eye) vs 눈 (snow): use context (face/weather)
-               - 배 (boat/stomach/pear): use context
-               - 다리 (leg/bridge): use context
-            6. If the message refers to "this/that image" or implies continuation,
-               maintain the topic from the conversation context.
-            7. If the message is NOT about visual content (greeting, thanks, off-topic),
-               output exactly: SKIP
+    public ExtractionResult extract(String userMessage, List<LlmCallContext.Turn> history) {
+        if (userMessage == null || userMessage.isBlank()) {
+            return ExtractionResult.skip();
+        }
 
-            Examples with context:
+        LlmService grok = pickService(LlmProvider.GROK);
 
-            Context: User is drawing a girl in a cafe.
-            User: "그럼 저 쥐고 있는 손으로 그리고 여자 아이 캐릭터 그리고 싶어"
-            Output: girl character holding cup hand pose cafe
+        List<LlmCallContext.Turn> turns = new ArrayList<>();
+        turns.add(new LlmCallContext.Turn(MessageRole.SYSTEM, SYSTEM_PROMPT));
 
-            Context: User is drawing a winter landscape.
-            User: "눈이 더 많이 내리는 느낌으로"
-            Output: heavy snowfall winter scene
+        if (history != null && !history.isEmpty()) {
+            turns.addAll(history);
+        }
 
-            Context: First message.
-            User: "벚꽃이 핀 봄 풍경 어떻게 그려요?"
-            Output: cherry blossoms spring landscape
+        LlmCallContext ctx = new LlmCallContext(turns, userMessage, null, null);
 
-            Context: User is drawing a portrait.
-            User: "눈이 더 크게"
-            Output: large eyes portrait expressive
-
-            Context: First message.
-            User: "How do I draw a cozy cafe interior?"
-            Output: cozy cafe interior warm lighting
-
-            Context: any
-            User: "안녕하세요"
-            Output: SKIP
-            """;
-
-  private static final int MAX_CONTEXT_TURNS = 4; // 최근 4턴만 컨텍스트로
-
-  private final List<LlmService> llmServices;
-
-  /**
-   * 메시지에서 검색 키워드 추출 (대화 컨텍스트 고려).
-   *
-   * @param userMessage 사용자 메시지
-   * @param recentHistory 최근 대화 (system 제외, USER/ASSISTANT)
-   * @return 영어 검색 키워드 (검색 불필요시 빈 문자열)
-   */
-  public String extract(String userMessage, List<LlmCallContext.Turn> recentHistory) {
-    if (userMessage == null || userMessage.isBlank()) {
-      return "";
+        try {
+            LlmCallResult result = grok.generate(ctx);
+            String output = result.content().trim();
+            return parseResult(output, userMessage);
+        } catch (Exception e) {
+            log.warn("검색 결정 실패, SKIP 처리: message='{}', error={}",
+                    userMessage, e.getMessage());
+            return ExtractionResult.skip();
+        }
     }
 
-    LlmService grok = pickService(LlmProvider.GROK);
+    private ExtractionResult parseResult(String output, String userMessage) {
+        if (output.startsWith("NEW_SEARCH:")) {
+            String keywords = output.substring("NEW_SEARCH:".length()).trim();
+            if (keywords.isEmpty()) {
+                return ExtractionResult.skip();
+            }
+            log.info("새 검색: '{}' → '{}'", userMessage, keywords);
+            return ExtractionResult.newSearch(keywords);
+        }
 
-    // 컨텍스트 구성: SYSTEM 프롬프트 + 최근 N턴
-    List<LlmCallContext.Turn> turns = new ArrayList<>();
-    turns.add(new LlmCallContext.Turn(MessageRole.SYSTEM, SYSTEM_PROMPT));
+        if ("KEEP".equalsIgnoreCase(output)) {
+            log.debug("이전 references 유지: '{}'", userMessage);
+            return ExtractionResult.keep();
+        }
 
-    if (recentHistory != null && !recentHistory.isEmpty()) {
-      List<LlmCallContext.Turn> trimmed = trimRecent(recentHistory, MAX_CONTEXT_TURNS);
-      turns.addAll(trimmed);
+        if ("SKIP".equalsIgnoreCase(output)) {
+            log.debug("검색 건너뜀: '{}'", userMessage);
+            return ExtractionResult.skip();
+        }
+
+        log.warn("판단 결과 형식 오류, SKIP 처리: output='{}'", output);
+        return ExtractionResult.skip();
     }
 
-    LlmCallContext ctx = new LlmCallContext(turns, userMessage, null, null);
-
-    try {
-      LlmCallResult result = grok.generate(ctx);
-      String keywords = result.content().trim();
-
-      if ("SKIP".equalsIgnoreCase(keywords) || keywords.isEmpty()) {
-        log.debug("키워드 추출 건너뜀: message='{}'", userMessage);
-        return "";
-      }
-
-      log.info("키워드 추출: '{}' → '{}'", userMessage, keywords);
-      return keywords;
-
-    } catch (Exception e) {
-      log.warn("키워드 추출 실패, 검색 건너뜀: message='{}', error={}", userMessage, e.getMessage());
-      return "";
+    private LlmService pickService(LlmProvider provider) {
+        return llmServices.stream()
+                .filter(s -> s.provider() == provider)
+                .findFirst()
+                .orElseThrow(() -> new IllegalStateException(
+                        "Provider not available: " + provider));
     }
-  }
-
-  /** 기존 호환성 — 컨텍스트 없이 호출 (사용 안 함, 폴백용). */
-  public String extract(String userMessage) {
-    return extract(userMessage, null);
-  }
-
-  /** 최근 N개의 USER/ASSISTANT 턴만 추출 (SYSTEM 제외). */
-  private List<LlmCallContext.Turn> trimRecent(List<LlmCallContext.Turn> history, int maxTurns) {
-    List<LlmCallContext.Turn> nonSystem =
-        history.stream().filter(t -> t.role() != MessageRole.SYSTEM).toList();
-    int from = Math.max(0, nonSystem.size() - maxTurns);
-    return new ArrayList<>(nonSystem.subList(from, nonSystem.size()));
-  }
-
-  private LlmService pickService(LlmProvider provider) {
-    return llmServices.stream()
-        .filter(s -> s.provider() == provider)
-        .findFirst()
-        .orElseThrow(() -> new IllegalStateException("Provider not available: " + provider));
-  }
 }
