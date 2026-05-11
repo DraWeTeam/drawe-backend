@@ -4,6 +4,7 @@ import com.drawe.backend.domain.Image;
 import com.drawe.backend.domain.ImageFeedback;
 import com.drawe.backend.domain.User;
 import com.drawe.backend.domain.enums.FeedbackType;
+import com.drawe.backend.domain.feedback.dto.FeedbackResponse;
 import com.drawe.backend.domain.feedback.repository.ImageFeedbackRepository;
 import com.drawe.backend.domain.image.repository.ImageRepository;
 import com.drawe.backend.global.error.CustomException;
@@ -56,5 +57,18 @@ public class ImageFeedbackService {
     feedbackRepository.findByUserAndImage(user, image).ifPresent(feedbackRepository::delete);
 
     log.info("피드백 제거: user={}, image={}", user.getId(), imageId);
+  }
+
+  @Transactional(readOnly = true)
+  public FeedbackResponse getFeedback(User user, Long imageId) {
+    Image image =
+        imageRepository
+            .findById(imageId)
+            .orElseThrow(() -> new CustomException(ErrorCode.NOT_FOUND));
+
+    return feedbackRepository
+        .findByUserAndImage(user, image)
+        .map(f -> new FeedbackResponse(f.getFeedback()))
+        .orElse(new FeedbackResponse(null)); // 피드백 없음
   }
 }

@@ -1,6 +1,7 @@
 package com.drawe.backend.domain.feedback.controller;
 
 import com.drawe.backend.domain.feedback.dto.FeedbackRequest;
+import com.drawe.backend.domain.feedback.dto.FeedbackResponse;
 import com.drawe.backend.domain.feedback.service.ImageFeedbackService;
 import com.drawe.backend.global.response.ApiResponse;
 import com.drawe.backend.global.security.PrincipalDetails;
@@ -16,6 +17,14 @@ import org.springframework.web.bind.annotation.*;
 public class ImageFeedbackController {
 
   private final ImageFeedbackService feedbackService;
+
+  @GetMapping("/{imageId}/feedback")
+  public ResponseEntity<ApiResponse<FeedbackResponse>> getFeedback(
+      @AuthenticationPrincipal PrincipalDetails principal, @PathVariable Long imageId) {
+
+    FeedbackResponse response = feedbackService.getFeedback(principal.getUser(), imageId);
+    return ResponseEntity.ok(ApiResponse.success(response));
+  }
 
   @PostMapping("/{imageId}/feedback")
   public ResponseEntity<ApiResponse<Void>> saveFeedback(
