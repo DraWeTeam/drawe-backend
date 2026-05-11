@@ -15,24 +15,23 @@ import org.springframework.web.bind.annotation.*;
 @RequiredArgsConstructor
 public class ImageFeedbackController {
 
-    private final ImageFeedbackService feedbackService;
+  private final ImageFeedbackService feedbackService;
 
-    @PostMapping("/{imageId}/feedback")
-    public ResponseEntity<ApiResponse<Void>> saveFeedback(
-            @AuthenticationPrincipal PrincipalDetails principal,
-            @PathVariable Long imageId,
-            @Valid @RequestBody FeedbackRequest request) {
+  @PostMapping("/{imageId}/feedback")
+  public ResponseEntity<ApiResponse<Void>> saveFeedback(
+      @AuthenticationPrincipal PrincipalDetails principal,
+      @PathVariable Long imageId,
+      @Valid @RequestBody FeedbackRequest request) {
 
-        feedbackService.saveFeedback(principal.getUser(), imageId, request.type());
-        return ResponseEntity.ok(ApiResponse.success(null));
-    }
+    feedbackService.saveFeedback(principal.getUser(), imageId, request.type());
+    return ResponseEntity.ok(ApiResponse.success(null));
+  }
 
-    @DeleteMapping("/{imageId}/feedback")
-    public ResponseEntity<ApiResponse<Void>> removeFeedback(
-            @AuthenticationPrincipal PrincipalDetails principal,
-            @PathVariable Long imageId) {
+  @DeleteMapping("/{imageId}/feedback")
+  public ResponseEntity<ApiResponse<Void>> removeFeedback(
+      @AuthenticationPrincipal PrincipalDetails principal, @PathVariable Long imageId) {
 
-        feedbackService.removeFeedback(principal.getUser(), imageId);
-        return ResponseEntity.ok(ApiResponse.success(null));
-    }
+    feedbackService.removeFeedback(principal.getUser(), imageId);
+    return ResponseEntity.ok(ApiResponse.success(null));
+  }
 }

@@ -93,8 +93,7 @@ public class SearchService {
                       tag != null ? tag.getUtility() : null,
                       tag != null ? tag.getFreeTags() : null,
                       img.getRawTags() != null ? img.getRawTags() : Collections.emptyList(),
-                      img.getSource() != null ? img.getSource().name() : null
-                  );
+                      img.getSource() != null ? img.getSource().name() : null);
                 })
             .filter(r -> r != null)
             .toList();

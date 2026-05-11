@@ -15,4 +15,4 @@ public record ImageResult(
     List<String> utility,
     List<String> freeTags,
     List<String> rawTags,
-    String source ) {}
+    String source) {}

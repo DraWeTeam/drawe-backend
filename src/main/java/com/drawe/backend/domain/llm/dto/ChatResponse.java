@@ -21,5 +21,5 @@ public record ChatResponse(
       String subject,
       String mood,
       Double similarity,
-      String source ) {}
+      String source) {}
 }

@@ -7,5 +7,5 @@ import java.util.Optional;
 import org.springframework.data.jpa.repository.JpaRepository;
 
 public interface ImageFeedbackRepository extends JpaRepository<ImageFeedback, Long> {
-    Optional<ImageFeedback> findByUserAndImage(User user, Image image);
+  Optional<ImageFeedback> findByUserAndImage(User user, Image image);
 }

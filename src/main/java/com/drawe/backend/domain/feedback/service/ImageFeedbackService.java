@@ -18,39 +18,43 @@ import org.springframework.transaction.annotation.Transactional;
 @RequiredArgsConstructor
 public class ImageFeedbackService {
 
-    private final ImageFeedbackRepository feedbackRepository;
-    private final ImageRepository imageRepository;
+  private final ImageFeedbackRepository feedbackRepository;
+  private final ImageRepository imageRepository;
 
-    @Transactional
-    public void saveFeedback(User user, Long imageId, FeedbackType type) {
-        Image image = imageRepository.findById(imageId)
-                .orElseThrow(() -> new CustomException(ErrorCode.NOT_FOUND));
+  @Transactional
+  public void saveFeedback(User user, Long imageId, FeedbackType type) {
+    Image image =
+        imageRepository
+            .findById(imageId)
+            .orElseThrow(() -> new CustomException(ErrorCode.NOT_FOUND));
 
-        // 기존 피드백 있으면 업데이트, 없으면 새로 생성
-        ImageFeedback feedback = feedbackRepository
-                .findByUserAndImage(user, image)
-                .orElseGet(() -> {
-                    ImageFeedback f = new ImageFeedback();
-                    f.setUser(user);
-                    f.setImage(image);
-                    return f;
+    // 기존 피드백 있으면 업데이트, 없으면 새로 생성
+    ImageFeedback feedback =
+        feedbackRepository
+            .findByUserAndImage(user, image)
+            .orElseGet(
+                () -> {
+                  ImageFeedback f = new ImageFeedback();
+                  f.setUser(user);
+                  f.setImage(image);
+                  return f;
                 });
 
-        feedback.setFeedback(type);
-        feedbackRepository.save(feedback);
+    feedback.setFeedback(type);
+    feedbackRepository.save(feedback);
 
-        log.info("피드백 저장: user={}, image={}, type={}",
-                user.getId(), imageId, type);
-    }
+    log.info("피드백 저장: user={}, image={}, type={}", user.getId(), imageId, type);
+  }
 
-    @Transactional
-    public void removeFeedback(User user, Long imageId) {
-        Image image = imageRepository.findById(imageId)
-                .orElseThrow(() -> new CustomException(ErrorCode.NOT_FOUND));
+  @Transactional
+  public void removeFeedback(User user, Long imageId) {
+    Image image =
+        imageRepository
+            .findById(imageId)
+            .orElseThrow(() -> new CustomException(ErrorCode.NOT_FOUND));
 
-        feedbackRepository.findByUserAndImage(user, image)
-                .ifPresent(feedbackRepository::delete);
+    feedbackRepository.findByUserAndImage(user, image).ifPresent(feedbackRepository::delete);
 
-        log.info("피드백 제거: user={}, image={}", user.getId(), imageId);
-    }
+    log.info("피드백 제거: user={}, image={}", user.getId(), imageId);
+  }
 }
