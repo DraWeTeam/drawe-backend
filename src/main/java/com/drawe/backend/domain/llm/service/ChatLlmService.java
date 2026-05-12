@@ -142,30 +142,74 @@ public class ChatLlmService {
           searchLogService.log(
               user, project, message, decision.keywords(), result.results(), "rag_chat");
 
-          // 안전장치: 평균 점수 낮으면 무관 결과로 판단
+          // 점수 통계 계산
           double avgScore =
               result.results().stream()
                   .mapToDouble(r -> r.score().doubleValue())
                   .average()
                   .orElse(0.0);
 
-          if (avgScore < 0.18) {
-            log.info("검색 결과 점수 낮음 (avgScore={}), 무관 결과로 판단", avgScore);
+          double maxScore =
+              result.results().stream().mapToDouble(r -> r.score().doubleValue()).max().orElse(0.0);
+
+          double minScore =
+              result.results().stream().mapToDouble(r -> r.score().doubleValue()).min().orElse(0.0);
+
+          // 상세 로그 — 사용자 메시지 + 키워드 + 점수 분포
+          log.info("========== 검색 분석 ==========");
+          log.info("user_id: {}", user.getId());
+          log.info("user_message: \"{}\"", message);
+          log.info("extracted_keywords: {}", decision.keywords());
+          log.info(
+              "score_stats: avg={}, max={}, min={}, count={}",
+              String.format("%.3f", avgScore),
+              String.format("%.3f", maxScore),
+              String.format("%.3f", minScore),
+              result.results().size());
+
+          // 각 결과의 점수와 태그 로그
+          for (int i = 0; i < result.results().size(); i++) {
+            ImageResult r = result.results().get(i);
+            log.info(
+                "  [{}] score={}, technique={}, subject={}, mood={}",
+                i + 1,
+                String.format("%.3f", r.score()),
+                r.technique(),
+                r.subject(),
+                r.mood());
+          }
+
+          // 안전장치 결정
+          if (avgScore < 0.2 || maxScore < 0.22) {
+            log.warn(
+                "❌ 무관 결과 판단: 검색 결과 차단 (avg={} < 0.2 || max={} < 0.22)",
+                String.format("%.3f", avgScore),
+                String.format("%.3f", maxScore));
+            log.info("================================");
             return List.of();
           }
 
-          log.info(
-              "새 references {}개 (avgScore={})",
-              result.results().size(),
-              String.format("%.2f", avgScore));
+          log.info("✅ 유효 결과: {}개 references 반환", result.results().size());
+          log.info("================================");
           return result.results();
+
         } catch (Exception e) {
-          log.warn("검색 실패: {}", e.getMessage());
+          log.error(
+              "검색 실패: message=\"{}\", keywords={}, error={}",
+              message,
+              decision.keywords(),
+              e.getMessage());
           return List.of();
         }
 
       case KEEP:
+        log.info("⏸️  KEEP — 이전 references 유지, user_message=\"{}\"", message);
+        return List.of();
+
       case SKIP:
+        log.info("⏭️  SKIP — 검색 불필요, user_message=\"{}\"", message);
+        return List.of();
+
       default:
         return List.of();
     }
