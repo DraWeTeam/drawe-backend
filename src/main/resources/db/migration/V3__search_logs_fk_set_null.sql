@@ -15,7 +15,10 @@ SET @fk_name = (
   LIMIT 1
 );
 
-SET @sql = CONCAT('ALTER TABLE search_logs DROP FOREIGN KEY `', @fk_name, '`');
+-- FK가 존재하면 DROP, 없으면 skip (예: 이전에 수동으로 DROP된 경우)
+SET @sql = IF(@fk_name IS NOT NULL,
+              CONCAT('ALTER TABLE search_logs DROP FOREIGN KEY `', @fk_name, '`'),
+              'DO 0');
 PREPARE stmt FROM @sql;
 EXECUTE stmt;
 DEALLOCATE PREPARE stmt;
