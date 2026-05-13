@@ -52,3 +52,4 @@ out/
 *.jpeg
 build-check/
 !src/main/resources/db/migration/*.sql
+!src/main/resources/db/seeds/*.sql
