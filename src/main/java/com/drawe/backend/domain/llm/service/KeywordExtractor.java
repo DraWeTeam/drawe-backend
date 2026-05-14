@@ -45,6 +45,19 @@ public class KeywordExtractor {
     Abstract to broad visual concepts CLIP can match (mood, style, scene).
     Avoid specific pose details (CLIP can't match them well).
 
+    ## Reference by number ("[N]번 같은 거")
+
+    When the user references a specific previously shown image by number
+    (e.g. "1번 같은 거", "3번 비슷한 분위기", "2번처럼 더 줘"):
+
+    1. Look at the previous assistant message in history.
+    2. The assistant has described what each [N] image is\s
+       (typically mentions technique, mood, subject, or visual elements).
+    3. Extract 3-5 core visual keywords from that description.
+    4. Output as NEW_SEARCH with English keywords.
+
+    If you cannot find clear description of [N] in history, fall back to KEEP.
+
     ## 2. KEEP
 
     User continues current topic with detail/refinement questions about the
@@ -65,6 +78,8 @@ public class KeywordExtractor {
     - "더 보여줘" → NEW_SEARCH (asking for more images)
     - "다른 방법으로 설명해줘" → KEEP (refinement)
     - "다른 거 보여줘" → NEW_SEARCH (different images)
+    - "[N]번 같은 거 더" → NEW_SEARCH (anchor pattern)
+    - "[N]번 어떻게 그려" → KEEP (technique question)
 
     ## 3. SKIP
 
@@ -129,7 +144,26 @@ public class KeywordExtractor {
     History: (any)
     User: "RGB와 CMYK 차이가 뭐야?"
     → SKIP
-    """;
+
+    History (assistant said): "[1]번 이미지처럼 수채화로 부드러운 색감을 표현하시면 좋습니다. [2]번은 잉크 풍 강한 대비가 특징이고, [3]번은 정물화 따뜻한 분위기예요."
+    User: "1번 같은 거 더 보여줘"
+    → NEW_SEARCH: watercolor soft pastel portrait
+
+    User: "2번처럼 더 줘"
+    → NEW_SEARCH: ink high contrast dramatic
+
+    User: "3번 비슷한 분위기"
+    → NEW_SEARCH: still life warm cozy
+
+    User: "1번 색감 어떻게 만들어?"  ← detail/technique question
+    → KEEP
+
+    User: "1번 좋네"  ← compliment
+    → KEEP
+
+    User: "1번 어떻게 그려?"  ← guide question
+    → KEEP
+  """;
 
   private final List<LlmService> llmServices;
 
