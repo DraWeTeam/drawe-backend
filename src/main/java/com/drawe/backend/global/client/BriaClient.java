@@ -46,7 +46,7 @@ public class BriaClient {
               .retrieve()
               .body(String.class);
 
-      log.info("Bria raw response: {}", raw);
+      log.info("Bria 응답 수신: response_length={}", raw == null ? 0 : raw.length());
       JsonNode root = objectMapper.readTree(raw);
 
       String imageUrl = extractImageUrl(root);
@@ -60,11 +60,15 @@ public class BriaClient {
         return pollForResult(statusUrl);
       }
 
-      log.error("Bria response missing image_url and status_url: raw={}", raw);
+      log.error(
+          "Bria response missing image_url and status_url: response_length={}",
+          raw == null ? 0 : raw.length());
       throw new CustomException(ErrorCode.AI_SERVICE_ERROR);
     } catch (RestClientResponseException e) {
       log.error(
-          "Bria HTTP error: status={}, body={}", e.getStatusCode(), e.getResponseBodyAsString());
+          "Bria HTTP error: status={}, body_length={}",
+          e.getStatusCode(),
+          e.getResponseBodyAsString() == null ? 0 : e.getResponseBodyAsString().length());
       throw new CustomException(ErrorCode.AI_SERVICE_ERROR);
     } catch (CustomException e) {
       throw e;
@@ -86,7 +90,10 @@ public class BriaClient {
               .body(String.class);
 
       if (attempt == 1 || attempt % 5 == 0) {
-        log.info("Bria poll attempt={} raw={}", attempt, raw);
+        log.info(
+            "Bria poll attempt={} response_length={}",
+            attempt,
+            raw == null ? 0 : raw.length());
       }
       JsonNode node = objectMapper.readTree(raw);
       String imageUrl = extractImageUrl(node);

@@ -113,9 +113,10 @@ public class PromptTranslator {
       return userPrompt;
     }
 
-    // 사용자 원문(한국어)은 PII 가능성 있어 길이만 기록. 변환 결과(영문)는 디버깅·생성 추적용으로 유지.
+    // 원문·변환 결과 모두 길이만 기록. 영문 프롬프트도 사용자 의도가 그대로 반영돼 PII 추적 가능성 있음.
+    // 디버깅 필요 시 prompt_translation_logs 테이블 (접근 권한 분리) 사용.
     log.info(
-        "프롬프트 변환 완료: ko_length={}, en='{}'", userPrompt.length(), translated);
+        "프롬프트 변환 완료: ko_length={}, en_length={}", userPrompt.length(), translated.length());
     persistLog(user, project, userPrompt, translated, PromptTranslationLog.Status.SUCCESS, null);
     return translated;
   }

@@ -104,7 +104,7 @@ public class GeminiService implements LlmService {
       List<Map<String, Object>> parts = (List<Map<String, Object>>) content.get("parts");
       return (String) parts.get(0).get("text");
     } catch (Exception e) {
-      log.error("Failed to parse Gemini response: {}", response, e);
+      log.error("Failed to parse Gemini response: error_class={}", e.getClass().getSimpleName());
       throw new CustomException(ErrorCode.AI_SERVICE_ERROR);
     }
   }

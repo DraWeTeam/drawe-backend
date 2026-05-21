@@ -266,7 +266,7 @@ public class KeywordExtractor {
       if (keywords.isEmpty()) {
         return ExtractionResult.skip();
       }
-      log.info("새 검색: keywords='{}'", keywords);
+      log.info("새 검색: keywords_length={}", keywords.length());
       return ExtractionResult.newSearch(keywords);
     }
 
@@ -276,7 +276,7 @@ public class KeywordExtractor {
         log.warn("GENERATE_NOW 프롬프트 비어있음, SKIP 처리");
         return ExtractionResult.skip();
       }
-      log.info("즉시 생성 요청: prompt='{}'", prompt);
+      log.info("즉시 생성 요청: prompt_length={}", prompt.length());
       return ExtractionResult.generateNow(prompt);
     }
 
@@ -290,7 +290,7 @@ public class KeywordExtractor {
       return ExtractionResult.skip();
     }
 
-    log.warn("판단 결과 형식 오류, SKIP 처리: output='{}'", output);
+    log.warn("판단 결과 형식 오류, SKIP 처리: output_length={}", output.length());
     return ExtractionResult.skip();
   }
 

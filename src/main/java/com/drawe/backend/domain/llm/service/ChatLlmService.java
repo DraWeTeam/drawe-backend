@@ -232,7 +232,9 @@ public class ChatLlmService {
           log.info("========== 검색 분석 ==========");
           log.info("user_id: {}", user.getId());
           log.info("session_id: {}", sessionId);
-          log.info("extracted_keywords: {}", decision.keywords());
+          log.info(
+              "keywords_length: {}",
+              decision.keywords() != null ? decision.keywords().length() : 0);
           log.info(
               "score_stats: avg={}, max={}, min={}, count={}",
               String.format("%.3f", avgScore),
@@ -283,8 +285,8 @@ public class ChatLlmService {
 
         } catch (Exception e) {
           log.error(
-              "검색 실패: keywords={}, error_class={}",
-              decision.keywords(),
+              "검색 실패: keywords_length={}, error_class={}",
+              decision.keywords() != null ? decision.keywords().length() : 0,
               e.getClass().getSimpleName());
 
           Map<String, Object> errorPayload = new HashMap<>();
@@ -377,10 +379,10 @@ public class ChatLlmService {
     session.setLastActive(Instant.now());
 
     log.info(
-        "GENERATE_NOW 처리 완료: user={}, imageId={}, prompt='{}'",
+        "GENERATE_NOW 처리 완료: user={}, imageId={}, prompt_length={}",
         user.getId(),
         image.getId(),
-        decision.keywords());
+        decision.keywords() != null ? decision.keywords().length() : 0);
 
     return new ChatResponse(
         session.getId(),

@@ -111,7 +111,7 @@ public class GrokService implements LlmService {
       Map<String, Object> message = (Map<String, Object>) choices.get(0).get("message");
       return (String) message.get("content");
     } catch (Exception e) {
-      log.error("Failed to parse Grok response: {}", response, e);
+      log.error("Failed to parse Grok response: error_class={}", e.getClass().getSimpleName());
       throw new CustomException(ErrorCode.AI_SERVICE_ERROR);
     }
   }
