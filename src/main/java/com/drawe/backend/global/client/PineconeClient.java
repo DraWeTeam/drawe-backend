@@ -3,6 +3,8 @@ package com.drawe.backend.global.client;
 import com.drawe.backend.global.client.dto.PineconeMatch;
 import com.drawe.backend.global.client.dto.PineconeQueryRequest;
 import com.drawe.backend.global.client.dto.PineconeQueryResponse;
+import com.drawe.backend.global.client.dto.PineconeUpsertRequest;
+import com.drawe.backend.global.client.dto.PineconeVector;
 import java.util.List;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
@@ -56,5 +58,25 @@ public class PineconeClient {
       log.error("Pinecone 호출 실패: error={}", e.getMessage());
       throw new RuntimeException("벡터 검색 실패: " + e.getMessage(), e);
     }
+  }
+
+  /**
+   * 벡터 하나를 Pinecone에 upsert. AI 이미지 적재용.
+   *
+   * @param id Pinecone vector ID. Image.sourceId와 동일 값을 사용 (예: "ai_1234")
+   * @param vector L2 정규화된 768차원 CLIP 벡터
+   * @param metadata 필터·노출용 메타. 최소 source, createdByUserId, prompt 포함 권장
+   */
+  public void upsert(String id, List<Float> vector, java.util.Map<String, Object> metadata) {
+    PineconeUpsertRequest body =
+        new PineconeUpsertRequest(List.of(new PineconeVector(id, vector, metadata)));
+    webClient
+        .post()
+        .uri("/vectors/upsert")
+        .bodyValue(body)
+        .retrieve()
+        .toBodilessEntity()
+        .block();
+    log.debug("Pinecone upsert 완료: id={}", id);
   }
 }

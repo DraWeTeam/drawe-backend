@@ -21,7 +21,7 @@ public class KeywordExtractor {
     You are a search decision system for a drawing reference image search.
 
     Read the user's message AND recent conversation history.
-    Decide ONE of three actions:
+    Decide ONE of four actions:
 
     ## 1. NEW_SEARCH: <english keywords>
 
@@ -32,11 +32,16 @@ public class KeywordExtractor {
     - New noun/subject not in previous conversation
     - Mood/style change ("이번엔", "다른 분위기", "바꿔")
     - Starting fresh ("처음부터", "새로")
-    - Explicit reference request:
+    - Explicit reference request (any natural phrasing counts):
       * "다른 거 보여줘", "더 보여줘", "또 보여줘"
       * "비슷한 거 더", "추가로 보여줘", "다른 이미지"
       * "다른 레퍼런스", "더 찾아줘", "참고 이미지"
-      * "another", "more", "show me other"
+      * "레퍼런스 볼 수 있을까", "레퍼런스 있어?", "레퍼런스는 없어?"
+      * "참고 그림", "예시 보여줘", "예시 있어?", "샘플 보여줘"
+      * "OO 그림 보여줘", "OO 사진 있어?"  (OO is any subject)
+      * "another", "more", "show me other", "reference", "example"
+    (NOTE: Image generation requests like "만들어줘", "그려줘" go to GENERATE_NOW
+    action below, NOT NEW_SEARCH. NEW_SEARCH is only for fetching existing references.)
 
     For "more/additional" requests, use previous keywords but with slight variation
     to ensure diversity in new results.
@@ -90,12 +95,38 @@ public class KeywordExtractor {
     - Abstract theory ("보색이 뭐야", "RGB CMYK 차이")
     - Meta questions ("어떻게 사용해", "너 누구야")
 
+    ## 4. GENERATE_NOW: <english prompt>
+
+    User EXPLICITLY asks to generate/create/draw an AI image right now.
+    The system will call Bria image-generation API immediately and skip search.
+
+    Signals (must be an explicit generation request, not just curiosity):
+    - "만들어줘", "그려줘", "생성해줘", "만들어줄래?", "그려줄래?"
+    - "AI로 만들어", "이미지 생성해줘", "그림 만들어줘"
+    - "한 번 만들어봐", "비슷한 거 만들어", "또 하나 만들어줘"
+    - "make it", "generate", "draw it for me", "create an image"
+
+    Refers-to + generate combo also goes here:
+    - "[2]번처럼 만들어줘" → GENERATE_NOW with prompt derived from [2]'s description
+    - "그런 느낌으로 만들어줘" → GENERATE_NOW using nearby context
+
+    Distinguish from NEW_SEARCH:
+    - "강아지 레퍼런스 보여줘" → NEW_SEARCH (fetch existing)
+    - "강아지 그림 만들어줘" → GENERATE_NOW (create new)
+    - "비슷한 거 더 보여줘" → NEW_SEARCH (more search)
+    - "비슷한 거 만들어줘" → GENERATE_NOW (generate new)
+
+    Output a concrete English image-generation prompt (3-15 words).
+    Include subject, style, mood, lighting if implied by context.
+    Use project/conversation context to make the prompt vivid.
+
     ---
 
     Output format: EXACTLY one line, no quotes, no extra text.
     - NEW_SEARCH: cherry blossoms spring landscape
     - KEEP
     - SKIP
+    - GENERATE_NOW: a cheerful golden retriever walking in soft sunlight, watercolor style
 
     ---
 
@@ -137,6 +168,34 @@ public class KeywordExtractor {
     User: "비슷한 인물 사진 더 보여줘"
     → NEW_SEARCH: portrait person photography
 
+    History: cat drawing topic
+    User: "혹시 기지개 펴는 고양이 레퍼런스를 볼 수 있을까?"
+    → NEW_SEARCH: cat stretching pose animal
+
+    History: cat drawing topic
+    User: "고양이 레퍼런스는 없어?"
+    → NEW_SEARCH: cat animal reference
+
+    History: cat drawing topic
+    User: "너가 대신 만들어줄래?"
+    → GENERATE_NOW: a cute cat stretching, soft watercolor, gentle lighting
+
+    History: hamburger drawing topic, assistant suggested patty close-up dreamy mood
+    User: "그렇게 이미지 만들어줘"
+    → GENERATE_NOW: a delicious hamburger close-up, juicy patty, dreamy soft pastel lighting
+
+    History: dog reference shown earlier, [2] is bright-coated puppy
+    User: "비슷한 걸로 만들어줘"
+    → GENERATE_NOW: a bright-coated cheerful puppy walking, watercolor, soft sunlight
+
+    History: any drawing context
+    User: "AI 이미지 만들어줘"
+    → GENERATE_NOW: <use most recent topic/keywords, e.g. a watercolor landscape>
+
+    History: landscape painting topic
+    User: "비 오는 거리 그림 있어?"
+    → NEW_SEARCH: rainy street scene atmosphere
+
     History: (any)
     User: "고마워"
     → SKIP
@@ -177,8 +236,16 @@ public class KeywordExtractor {
     List<LlmCallContext.Turn> turns = new ArrayList<>();
     turns.add(new LlmCallContext.Turn(MessageRole.SYSTEM, SYSTEM_PROMPT));
 
+    // 채팅용 페르소나/프로젝트 컨텍스트(SYSTEM)는 분류기의 의도를 오염시킨다.
+    // 예: 페르소나에 "이미지 직접 생성·제공 금지"가 있으면 Grok이 "만들어줘" 요청을
+    // 검색 의도가 아니라 거절 대상으로 해석해 SKIP 으로 보낼 수 있다.
+    // 분류기 자신의 SYSTEM 프롬프트만 남기고 user/assistant 대화만 컨텍스트로 넘긴다.
     if (history != null && !history.isEmpty()) {
-      turns.addAll(history);
+      for (LlmCallContext.Turn t : history) {
+        if (t.role() != MessageRole.SYSTEM) {
+          turns.add(t);
+        }
+      }
     }
 
     LlmCallContext ctx = new LlmCallContext(turns, userMessage, null, null);
@@ -201,6 +268,16 @@ public class KeywordExtractor {
       }
       log.info("새 검색: '{}' → '{}'", userMessage, keywords);
       return ExtractionResult.newSearch(keywords);
+    }
+
+    if (output.startsWith("GENERATE_NOW:")) {
+      String prompt = output.substring("GENERATE_NOW:".length()).trim();
+      if (prompt.isEmpty()) {
+        log.warn("GENERATE_NOW 프롬프트 비어있음, SKIP 처리: '{}'", userMessage);
+        return ExtractionResult.skip();
+      }
+      log.info("즉시 생성 요청: '{}' → '{}'", userMessage, prompt);
+      return ExtractionResult.generateNow(prompt);
     }
 
     if ("KEEP".equalsIgnoreCase(output)) {

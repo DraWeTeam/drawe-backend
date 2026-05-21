@@ -12,7 +12,6 @@ import com.drawe.backend.domain.llm.dto.*;
 import com.drawe.backend.domain.llm.repository.ChatSessionRepository;
 import com.drawe.backend.domain.llm.repository.LlmMessageRepository;
 import com.drawe.backend.domain.log.SearchLogService;
-import com.drawe.backend.domain.onboarding.UserPrefSummaryService;
 import com.drawe.backend.domain.project.repository.ProjectRepository;
 import com.drawe.backend.domain.search.dto.ImageResult;
 import com.drawe.backend.domain.search.dto.SearchRequest;
@@ -47,7 +46,6 @@ public class ChatLlmService {
   private final KeywordExtractor keywordExtractor;
   private final SearchService searchService;
   private final SearchLogService searchLogService;
-  private final UserPrefSummaryService userPrefSummaryService;
 
   @Transactional
   public ChatResponse chat(User user, Long projectId, ChatRequest request) {
@@ -140,7 +138,7 @@ public class ChatLlmService {
     switch (decision.action()) {
       case NEW_SEARCH:
         try {
-          SearchResponse result = searchService.search(new SearchRequest(decision.keywords(), 10));
+          SearchResponse result = searchService.search(new SearchRequest(decision.keywords(), 6));
           searchLogService.log(
               user, project, message, decision.keywords(), result.results(), "rag_chat");
 
@@ -284,21 +282,6 @@ public class ChatLlmService {
     persona.setContent(personaRegistry.resolve(PersonaRegistry.DEFAULT_KEY));
     persona.setHasImage(false);
     llmMessageRepository.save(persona);
-
-    String userPrefs = userPrefSummaryService.buildSummary(user);
-    if (!userPrefs.isBlank()) {
-      LlmMessage prefsMsg = new LlmMessage();
-      prefsMsg.setChatSession(session);
-      prefsMsg.setRole(MessageRole.SYSTEM);
-      prefsMsg.setContent(userPrefs);
-      prefsMsg.setHasImage(false);
-      llmMessageRepository.save(prefsMsg);
-      log.info(
-          "세션 생성 시 사용자 선호 인젝션: userId={}, sessionId={}, prefsLength={}",
-          user.getId(),
-          session.getId(),
-          userPrefs.length());
-    }
 
     String projectContext = buildProjectContext(project);
     if (projectContext != null) {

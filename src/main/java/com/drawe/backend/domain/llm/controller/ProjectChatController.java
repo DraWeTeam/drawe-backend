@@ -3,6 +3,8 @@ package com.drawe.backend.domain.llm.controller;
 import com.drawe.backend.domain.llm.dto.ChatHistoryResponse;
 import com.drawe.backend.domain.llm.dto.ChatRequest;
 import com.drawe.backend.domain.llm.dto.ChatResponse;
+import com.drawe.backend.domain.llm.dto.GenerateImageRequest;
+import com.drawe.backend.domain.llm.dto.GenerateImageResponse;
 import com.drawe.backend.domain.llm.service.ChatLlmService;
 import com.drawe.backend.global.response.ApiResponse;
 import com.drawe.backend.global.security.PrincipalDetails;
@@ -48,5 +50,15 @@ public class ProjectChatController {
       @PathVariable String sessionId) {
     chatLlmService.resetSession(principal.getUser(), projectId, sessionId);
     return ApiResponse.success(Map.of("success", true));
+  }
+
+  @PostMapping("/{sessionId}/generate")
+  public ApiResponse<GenerateImageResponse> generateImage(
+      @AuthenticationPrincipal PrincipalDetails principal,
+      @PathVariable Long projectId,
+      @PathVariable String sessionId,
+      @Valid @RequestBody GenerateImageRequest request) {
+    return ApiResponse.success(
+        chatLlmService.generateImage(principal.getUser(), projectId, sessionId, request));
   }
 }
