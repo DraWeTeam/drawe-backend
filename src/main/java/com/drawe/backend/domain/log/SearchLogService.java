@@ -42,7 +42,7 @@ public class SearchLogService {
 
     } catch (Exception e) {
       // 검색 로그 저장 실패해도 응답에 영향 없음
-      log.warn("검색 로그 저장 실패: error={}", e.getMessage());
+      log.warn("검색 로그 저장 실패: error_class={}", e.getClass().getSimpleName());
     }
   }
 

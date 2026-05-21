@@ -70,13 +70,7 @@ public class PineconeClient {
   public void upsert(String id, List<Float> vector, java.util.Map<String, Object> metadata) {
     PineconeUpsertRequest body =
         new PineconeUpsertRequest(List.of(new PineconeVector(id, vector, metadata)));
-    webClient
-        .post()
-        .uri("/vectors/upsert")
-        .bodyValue(body)
-        .retrieve()
-        .toBodilessEntity()
-        .block();
+    webClient.post().uri("/vectors/upsert").bodyValue(body).retrieve().toBodilessEntity().block();
     log.debug("Pinecone upsert 완료: id={}", id);
   }
 }

@@ -38,7 +38,7 @@ public class ImageUploadService {
     try {
       return imageStorage.store(user, file.getBytes(), mime);
     } catch (IOException e) {
-      log.error("Failed to read upload bytes", e);
+      log.error("Failed to read upload bytes: error_class={}", e.getClass().getSimpleName());
       throw new CustomException(ErrorCode.INTERNAL_SERVER_ERROR);
     }
   }

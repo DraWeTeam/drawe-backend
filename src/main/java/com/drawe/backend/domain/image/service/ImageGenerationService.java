@@ -61,7 +61,7 @@ public class ImageGenerationService {
               ? entity.getHeaders().getContentType().toString()
               : DEFAULT_MIME;
     } catch (Exception e) {
-      log.error("Bria 이미지 다운로드 실패: url={}", bria.imageUrl(), e);
+      log.error("Bria 이미지 다운로드 실패: error_class={}", e.getClass().getSimpleName());
       throw new CustomException(ErrorCode.AI_SERVICE_ERROR);
     }
 

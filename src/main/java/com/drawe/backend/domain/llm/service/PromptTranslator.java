@@ -21,8 +21,8 @@ import org.springframework.stereotype.Service;
 /**
  * 한국어 채팅 메시지를 Bria 가 잘 이해하는 영문 image-generation prompt 로 변환한다.
  *
- * <p>고정 모델 (Grok) 을 사용 — 변환 작업은 단순·짧아서 저렴한 모델로 충분, 비용·응답시간 예측성 확보. 프로젝트의 subject/technique/mood 가 있으면
- * 자동으로 함께 반영한다.
+ * <p>고정 모델 (Grok) 을 사용 — 변환 작업은 단순·짧아서 저렴한 모델로 충분, 비용·응답시간 예측성 확보. 프로젝트의 subject/technique/mood 가
+ * 있으면 자동으로 함께 반영한다.
  */
 @Slf4j
 @Service
@@ -78,16 +78,20 @@ public class PromptTranslator {
           "PromptTranslator LLM 호출 실패, 원문 사용: prompt_length={}, error_class={}",
           userPrompt.length(),
           e.getClass().getSimpleName());
-      persistLog(user, project, userPrompt, null, PromptTranslationLog.Status.FAILED, e.getMessage());
+      persistLog(
+          user, project, userPrompt, null, PromptTranslationLog.Status.FAILED, e.getMessage());
       return userPrompt;
     }
 
     if (raw.isBlank()) {
-      log.warn(
-          "PromptTranslator 가 빈 결과를 돌려줘서 원본을 사용합니다. prompt_length={}",
-          userPrompt.length());
+      log.warn("PromptTranslator 가 빈 결과를 돌려줘서 원본을 사용합니다. prompt_length={}", userPrompt.length());
       persistLog(
-          user, project, userPrompt, null, PromptTranslationLog.Status.FALLBACK_RAW, "empty result");
+          user,
+          project,
+          userPrompt,
+          null,
+          PromptTranslationLog.Status.FALLBACK_RAW,
+          "empty result");
       return userPrompt;
     }
 
@@ -101,8 +105,7 @@ public class PromptTranslator {
     }
 
     if (translated.isBlank()) {
-      log.warn(
-          "PromptTranslator 정제 결과가 비어있어 원본을 사용합니다. raw_length={}", raw.length());
+      log.warn("PromptTranslator 정제 결과가 비어있어 원본을 사용합니다. raw_length={}", raw.length());
       persistLog(
           user,
           project,
@@ -115,8 +118,7 @@ public class PromptTranslator {
 
     // 원문·변환 결과 모두 길이만 기록. 영문 프롬프트도 사용자 의도가 그대로 반영돼 PII 추적 가능성 있음.
     // 디버깅 필요 시 prompt_translation_logs 테이블 (접근 권한 분리) 사용.
-    log.info(
-        "프롬프트 변환 완료: ko_length={}, en_length={}", userPrompt.length(), translated.length());
+    log.info("프롬프트 변환 완료: ko_length={}, en_length={}", userPrompt.length(), translated.length());
     persistLog(user, project, userPrompt, translated, PromptTranslationLog.Status.SUCCESS, null);
     return translated;
   }
@@ -143,7 +145,9 @@ public class PromptTranslator {
       }
       translationLogRepository.save(logEntry);
     } catch (Exception e) {
-      log.warn("PromptTranslationLog 저장 실패 — 변환 결과에 영향 없음: {}", e.getMessage());
+      log.warn(
+          "PromptTranslationLog 저장 실패 — 변환 결과에 영향 없음: error_class={}",
+          e.getClass().getSimpleName());
     }
   }
 

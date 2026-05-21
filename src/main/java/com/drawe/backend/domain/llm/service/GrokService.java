@@ -56,11 +56,15 @@ public class GrokService implements LlmService {
               .retrieve()
               .body(Map.class);
     } catch (org.springframework.web.client.RestClientResponseException e) {
-      log.error(
-          "Grok HTTP error: status={}, body={}", e.getStatusCode(), e.getResponseBodyAsString());
+      log.error("Grok HTTP error: status={}", e.getStatusCode());
+      log.debug("Grok HTTP error body: {}", e.getResponseBodyAsString());
       throw new CustomException(ErrorCode.AI_SERVICE_ERROR);
     } catch (Exception e) {
-      log.error("Grok call failed: url={}, model={}", url, cfg.getModel(), e);
+      log.error(
+          "Grok call failed: url={}, model={}, error_class={}",
+          url,
+          cfg.getModel(),
+          e.getClass().getSimpleName());
       throw new CustomException(ErrorCode.AI_SERVICE_ERROR);
     }
     int latency = (int) (System.currentTimeMillis() - start);

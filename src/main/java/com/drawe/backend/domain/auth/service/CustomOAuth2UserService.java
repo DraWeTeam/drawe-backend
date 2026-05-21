@@ -60,11 +60,17 @@ public class CustomOAuth2UserService implements OAuth2UserService<OAuth2UserRequ
                             .build()));
 
     log.info(
-        "OAuth login success: email={}, provider={}, providerId={}",
-        user.getEmail(),
-        user.getProvider(),
-        user.getProviderId());
+        "OAuth login success: userId={}, email_masked={}, provider={}",
+        user.getId(),
+        maskEmail(user.getEmail()), // "a***@gmail.com"
+        user.getProvider());
 
     return new PrincipalDetails(user, attributes.getAttributes());
+  }
+
+  private String maskEmail(String email) {
+    if (email == null || !email.contains("@")) return "***";
+    int at = email.indexOf("@");
+    return email.charAt(0) + "***" + email.substring(at);
   }
 }

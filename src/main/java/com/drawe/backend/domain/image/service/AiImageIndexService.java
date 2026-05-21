@@ -25,14 +25,15 @@ import org.springframework.transaction.event.TransactionalEventListener;
  * AI 생성 이미지를 CLIP 임베딩 → Pinecone upsert 까지 책임지는 비동기 인덱서.
  *
  * <p>설계 결정:
+ *
  * <ul>
  *   <li>비동기로 분리해 사용자 응답 지연을 막는다.
  *   <li>실패해도 사용자 응답은 이미 끝났으므로 로그만 남기고 throw 하지 않는다.
  *   <li>성공 시 {@link Image#getIndexedAt()}을 채워, 미인덱싱 이미지를 추후 수동/배치 재처리할 수 있게 한다.
  * </ul>
  *
- * <p>주의: @Async 진입 메서드와 @Transactional 메서드는 분리되어 있어야 프록시 체인이 정상 동작한다.
- * 트랜잭션 작업은 {@link AiImageIndexTxService}로 위임한다.
+ * <p>주의: @Async 진입 메서드와 @Transactional 메서드는 분리되어 있어야 프록시 체인이 정상 동작한다. 트랜잭션 작업은 {@link
+ * AiImageIndexTxService}로 위임한다.
  */
 @Slf4j
 @Service
@@ -47,8 +48,8 @@ public class AiImageIndexService {
   /**
    * AFTER_COMMIT 단계에서 이벤트를 받아 비동기 인덱싱을 트리거.
    *
-   * <p>호출 측 트랜잭션이 commit 된 뒤에 실행되므로, 비동기 스레드에서 findById 가 새 행을 정상적으로 본다.
-   * (이전에는 commit 전에 @Async 가 돌아 "AI 이미지 적재 대상 없음" 로그가 찍히던 문제.)
+   * <p>호출 측 트랜잭션이 commit 된 뒤에 실행되므로, 비동기 스레드에서 findById 가 새 행을 정상적으로 본다. (이전에는 commit 전에 @Async 가
+   * 돌아 "AI 이미지 적재 대상 없음" 로그가 찍히던 문제.)
    */
   @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
   public void onAiImageCreated(AiImageCreatedEvent event) {
@@ -58,8 +59,8 @@ public class AiImageIndexService {
   /**
    * Bria 로부터 받은 이미지 바이트를 CLIP 임베딩하고 Pinecone 에 적재한다.
    *
-   * <p>Image 는 호출 측 트랜잭션에서 이미 저장된 상태여야 한다 (id, sourceId 확정).
-   * 메타데이터 중 subject/technique/mood 는 프로젝트 정보를 상속한다.
+   * <p>Image 는 호출 측 트랜잭션에서 이미 저장된 상태여야 한다 (id, sourceId 확정). 메타데이터 중 subject/technique/mood 는 프로젝트
+   * 정보를 상속한다.
    */
   @Async
   public void indexAsync(Long imageId, byte[] imageBytes, String mimeType, Project project) {
@@ -87,7 +88,10 @@ public class AiImageIndexService {
     } catch (Exception e) {
       // 비동기 경계 — throw 해도 받을 사람이 없으므로 로그만 남긴다.
       // indexed_at 미설정으로 남으므로 추후 재처리 대상이 된다.
-      log.error("AI 이미지 Pinecone 적재 실패: imageId={}, error={}", imageId, e.getMessage(), e);
+      log.error(
+          "AI 이미지 Pinecone 적재 실패: imageId={}, error_class={}",
+          imageId,
+          e.getClass().getSimpleName());
     }
   }
 
@@ -147,8 +151,7 @@ public class AiImageIndexService {
       if (project == null) {
         return;
       }
-      boolean alreadyTagged =
-          !imageDraweTagRepository.findByImageIdIn(List.of(imageId)).isEmpty();
+      boolean alreadyTagged = !imageDraweTagRepository.findByImageIdIn(List.of(imageId)).isEmpty();
       if (alreadyTagged) {
         return;
       }

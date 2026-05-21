@@ -49,7 +49,7 @@ public class SearchService {
     // 2. 벡터 -> Pinecone 검색
     List<PineconeMatch> matches = pineconeClient.queryByVector(vector, topK);
     if (matches.isEmpty()) {
-      log.info("검색 결과 없음: query='{}'", query);
+      log.info("검색 결과 없음: query_length={}", query.length());
       return new SearchResponse(List.of(), 0, query);
     }
 
@@ -98,7 +98,7 @@ public class SearchService {
             .filter(r -> r != null)
             .toList();
 
-    log.info("검색 완료: query='{}', 반환={}개", query, results.size());
+    log.info("검색 완료: query_length={}, 반환={}개", query.length(), results.size());
     return new SearchResponse(results, results.size(), query);
   }
 }

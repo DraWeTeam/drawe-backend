@@ -85,7 +85,8 @@ public class FastApiClient {
         throw new IllegalStateException("FastAPI 이미지 임베딩 응답이 비었습니다.");
       }
 
-      log.debug("FastAPI 이미지 임베딩 성공: bytes={}, dimension={}", imageBytes.length, response.dimension());
+      log.debug(
+          "FastAPI 이미지 임베딩 성공: bytes={}, dimension={}", imageBytes.length, response.dimension());
       return response.embedding();
     } catch (Exception e) {
       log.error("FastAPI 이미지 임베딩 호출 실패: bytes={}, error={}", imageBytes.length, e.getMessage());

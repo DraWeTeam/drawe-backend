@@ -91,9 +91,7 @@ public class BriaClient {
 
       if (attempt == 1 || attempt % 5 == 0) {
         log.info(
-            "Bria poll attempt={} response_length={}",
-            attempt,
-            raw == null ? 0 : raw.length());
+            "Bria poll attempt={} response_length={}", attempt, raw == null ? 0 : raw.length());
       }
       JsonNode node = objectMapper.readTree(raw);
       String imageUrl = extractImageUrl(node);

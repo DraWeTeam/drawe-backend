@@ -5,7 +5,9 @@ import com.drawe.backend.domain.User;
 import com.drawe.backend.domain.analytics.repository.AnalyticsEventRepository;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import java.util.HashMap;
 import java.util.Map;
+import java.util.Set;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -18,8 +20,8 @@ import org.springframework.transaction.annotation.Transactional;
  * <p>한 번의 track() 호출이 두 군데로 데이터 전송:
  *
  * <ul>
- *   <li>analytics_events 테이블 — DBeaver/SQL로 사후 분석
- *   <li>로그 (CloudWatch) — 실시간 모니터링
+ *   <li>analytics_events 테이블 — DBeaver/SQL로 사후 분석 (원본 payload 유지, 접근 권한 통제)
+ *   <li>로그 (CloudWatch) — 실시간 모니터링 (사용자 의도 파생 필드는 길이로 마스킹)
  * </ul>
  *
  * <p>이벤트 저장 실패는 비즈니스 로직에 영향 X. 에러만 로깅하고 계속 진행.
@@ -32,6 +34,13 @@ import org.springframework.transaction.annotation.Transactional;
 @Service
 @RequiredArgsConstructor
 public class AnalyticsEventService {
+
+  /**
+   * 로그에 박지 않을 payload 키 — 사용자 메시지/의도에서 파생된 값들.
+   *
+   * <p>DB에는 그대로 저장 (분석용). 로그엔 {@code <key>_length} 로 치환되어 박힘.
+   */
+  private static final Set<String> SENSITIVE_PAYLOAD_KEYS = Set.of("keyword");
 
   private final AnalyticsEventRepository eventRepository;
   private final ObjectMapper objectMapper;
@@ -81,26 +90,53 @@ public class AnalyticsEventService {
       event.setEventType(eventType);
       event.setUserId(userId);
       event.setSessionId(sessionId);
-      event.setPayloadJson(serializePayload(payload));
+      event.setPayloadJson(serializePayload(payload)); // DB: 원본 payload (분석용)
       eventRepository.save(event);
 
+      // CloudWatch 로그: 사용자 의도 파생 필드는 길이로 마스킹
       log.info(
           "📊 event_type={}, user_id={}, session_id={}, payload={}",
           eventType,
           userId,
           sessionId,
-          payload != null ? payload : "{}");
+          sanitizePayloadForLog(payload));
     } catch (Exception e) {
-      // 분석 이벤트 실패가 비즈니스를 중단시키지 않게.
-      log.warn("Analytics event 저장 실패: type={}, error={}", eventType, e.getMessage());
+      log.warn(
+          "Analytics event 저장 실패: type={}, error_class={}",
+          eventType,
+          e.getClass().getSimpleName());
     }
+  }
+
+  /**
+   * 로그용 payload 정제.
+   *
+   * <p>{@link #SENSITIVE_PAYLOAD_KEYS}에 해당하는 키는 값을 제거하고 {@code <key>_length}로 치환. DB에 저장되는 원본
+   * payload엔 영향 없음.
+   *
+   * <p>예: {@code {keyword: "watercolor portrait"}} → {@code {keyword_length: 19}}
+   */
+  private Map<String, Object> sanitizePayloadForLog(Map<String, Object> payload) {
+    if (payload == null || payload.isEmpty()) {
+      return Map.of();
+    }
+    Map<String, Object> safe = new HashMap<>(payload);
+    for (String key : SENSITIVE_PAYLOAD_KEYS) {
+      Object value = safe.remove(key);
+      if (value instanceof String s) {
+        safe.put(key + "_length", s.length());
+      } else if (value != null) {
+        safe.put(key + "_present", true);
+      }
+    }
+    return safe;
   }
 
   private String serializePayload(Map<String, Object> payload) {
     try {
       return objectMapper.writeValueAsString(payload != null ? payload : Map.of());
     } catch (JsonProcessingException e) {
-      log.warn("Payload 직렬화 실패", e);
+      log.warn("Payload 직렬화 실패: error_class={}", e.getClass().getSimpleName());
       return "{}";
     }
   }

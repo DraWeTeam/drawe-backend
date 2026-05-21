@@ -1,6 +1,7 @@
 package com.drawe.backend.domain.llm.service;
 
 import com.drawe.backend.domain.ChatSession;
+import com.drawe.backend.domain.Image;
 import com.drawe.backend.domain.LlmMessage;
 import com.drawe.backend.domain.Project;
 import com.drawe.backend.domain.User;
@@ -10,7 +11,6 @@ import com.drawe.backend.domain.enums.LlmCallStatus;
 import com.drawe.backend.domain.enums.LlmProvider;
 import com.drawe.backend.domain.enums.MessageRole;
 import com.drawe.backend.domain.enums.UserPlan;
-import com.drawe.backend.domain.Image;
 import com.drawe.backend.domain.image.service.ImageGenerationService;
 import com.drawe.backend.domain.llm.dto.*;
 import com.drawe.backend.domain.llm.repository.ChatSessionRepository;
@@ -154,8 +154,7 @@ public class ChatLlmService {
       // 그러면 본문은 약속하고 버튼은 안 뜨는 모순이 사용자한테 보임.
       if (!offerGenerate && mentionsGenerateOffer(result.content())) {
         offerGenerate = true;
-        log.info(
-            "LLM 답변에 생성 안내 표현 감지 → offerGenerate 강제 true: session={}", session.getId());
+        log.info("LLM 답변에 생성 안내 표현 감지 → offerGenerate 강제 true: session={}", session.getId());
       }
 
       Map<String, Object> successPayload = new HashMap<>();
@@ -245,8 +244,9 @@ public class ChatLlmService {
           for (int i = 0; i < result.results().size(); i++) {
             ImageResult r = result.results().get(i);
             log.info(
-                "  [{}] score={}, technique={}, subject={}, mood={}",
+                "  [{}] id={}, score={}, technique={}, subject={}, mood={}",
                 i + 1,
+                r.id(),
                 String.format("%.3f", r.score()),
                 r.technique(),
                 r.subject(),
@@ -260,6 +260,17 @@ public class ChatLlmService {
           searchPayload.put("avg_score", round3(avgScore));
           searchPayload.put("max_score", round3(maxScore));
           searchPayload.put("min_score", round3(minScore));
+
+          // 검색 결과 image_id 배열 (분석/디버깅용)
+          List<Long> imageIds = result.results().stream().map(ImageResult::id).toList();
+          searchPayload.put("image_ids", imageIds);
+
+          // 점수도 같이 (소수점 3자리)
+          List<Double> scores =
+              result.results().stream()
+                  .map(r -> Math.round(r.score().doubleValue() * 1000.0) / 1000.0)
+                  .toList();
+          searchPayload.put("scores", scores);
 
           if (avgScore < 0.2 || maxScore < 0.22) {
             log.warn(
@@ -346,6 +357,7 @@ public class ChatLlmService {
    * GENERATE_NOW 분기 — 사용자가 명시적으로 "만들어줘"라고 했을 때 검색·LLM 답변을 건너뛰고 즉시 Bria 호출.
    *
    * <p>일반 chat 경로와 다른 점:
+   *
    * <ul>
    *   <li>검색하지 않음 (사용자가 새 이미지를 원했음이 분명함)
    *   <li>LLM 답변 호출하지 않음 — 답변은 고정 문구로 대체 ("만들어왔어요" 할루시네이션 원천 차단)
@@ -353,7 +365,11 @@ public class ChatLlmService {
    * </ul>
    */
   private ChatResponse handleGenerateNow(
-      User user, Project project, ChatSession session, ChatRequest request, ExtractionResult decision) {
+      User user,
+      Project project,
+      ChatSession session,
+      ChatRequest request,
+      ExtractionResult decision) {
     // 사용자 메시지 저장
     LlmMessage userMsg = new LlmMessage();
     userMsg.setChatSession(session);
@@ -395,9 +411,7 @@ public class ChatLlmService {
         new ChatResponse.GeneratedImage(image.getId(), image.getUrl(), decision.keywords()));
   }
 
-  /**
-   * 사용자가 "AI 이미지 만들어주세요" 버튼을 누른 경우 호출. Bria 로 이미지 생성 후 세션에 ASSISTANT 메시지로 기록.
-   */
+  /** 사용자가 "AI 이미지 만들어주세요" 버튼을 누른 경우 호출. Bria 로 이미지 생성 후 세션에 ASSISTANT 메시지로 기록. */
   @Transactional
   public GenerateImageResponse generateImage(
       User user, Long projectId, String sessionId, GenerateImageRequest request) {
@@ -417,7 +431,8 @@ public class ChatLlmService {
 
     session.setLastActive(Instant.now());
 
-    return new GenerateImageResponse(session.getId(), image.getId(), image.getUrl(), request.prompt());
+    return new GenerateImageResponse(
+        session.getId(), image.getId(), image.getUrl(), request.prompt());
   }
 
   @Transactional
