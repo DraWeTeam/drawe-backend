@@ -74,13 +74,18 @@ public class PromptTranslator {
       LlmCallResult result = llm.generate(ctx);
       raw = result.content() == null ? "" : result.content().trim();
     } catch (Exception e) {
-      log.warn("PromptTranslator LLM 호출 실패, 원문 사용: userPrompt='{}', error={}", userPrompt, e.getMessage());
+      log.warn(
+          "PromptTranslator LLM 호출 실패, 원문 사용: prompt_length={}, error_class={}",
+          userPrompt.length(),
+          e.getClass().getSimpleName());
       persistLog(user, project, userPrompt, null, PromptTranslationLog.Status.FAILED, e.getMessage());
       return userPrompt;
     }
 
     if (raw.isBlank()) {
-      log.warn("PromptTranslator 가 빈 결과를 돌려줘서 원본을 사용합니다. userPrompt='{}'", userPrompt);
+      log.warn(
+          "PromptTranslator 가 빈 결과를 돌려줘서 원본을 사용합니다. prompt_length={}",
+          userPrompt.length());
       persistLog(
           user, project, userPrompt, null, PromptTranslationLog.Status.FALLBACK_RAW, "empty result");
       return userPrompt;
@@ -90,11 +95,14 @@ public class PromptTranslator {
     if (translated == null) {
       translated = sanitize(raw);
       log.warn(
-          "PromptTranslator JSON 파싱 실패, sanitize fallback 사용: raw='{}' -> '{}'", raw, translated);
+          "PromptTranslator JSON 파싱 실패, sanitize fallback 사용: raw_length={}, translated_length={}",
+          raw.length(),
+          translated.length());
     }
 
     if (translated.isBlank()) {
-      log.warn("PromptTranslator 정제 결과가 비어있어 원본을 사용합니다. raw='{}'", raw);
+      log.warn(
+          "PromptTranslator 정제 결과가 비어있어 원본을 사용합니다. raw_length={}", raw.length());
       persistLog(
           user,
           project,
@@ -105,7 +113,9 @@ public class PromptTranslator {
       return userPrompt;
     }
 
-    log.info("프롬프트 변환: '{}' -> '{}'", userPrompt, translated);
+    // 사용자 원문(한국어)은 PII 가능성 있어 길이만 기록. 변환 결과(영문)는 디버깅·생성 추적용으로 유지.
+    log.info(
+        "프롬프트 변환 완료: ko_length={}, en='{}'", userPrompt.length(), translated);
     persistLog(user, project, userPrompt, translated, PromptTranslationLog.Status.SUCCESS, null);
     return translated;
   }

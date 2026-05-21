@@ -45,7 +45,8 @@ public class ImageGenerationService {
       throw new CustomException(ErrorCode.INVALID_INPUT);
     }
 
-    log.info("AI 이미지 생성 요청: user={}, prompt='{}'", user.getId(), prompt);
+    // prompt 가 사용자 한국어 원문일 수도 있어 길이만 기록. 변환된 영문은 아래 PromptTranslator 로그에서 확인.
+    log.info("AI 이미지 생성 요청: user={}, prompt_length={}", user.getId(), prompt.length());
     String englishPrompt = promptTranslator.translate(user, prompt, project);
     BriaGenerateResponse bria = briaClient.generate(englishPrompt);
 
