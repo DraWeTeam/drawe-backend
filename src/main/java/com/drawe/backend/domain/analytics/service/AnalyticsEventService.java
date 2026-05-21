@@ -43,8 +43,7 @@ public class AnalyticsEventService {
    * @param payload 이벤트 상세 데이터. null이면 빈 객체로 저장.
    */
   @Transactional(propagation = Propagation.REQUIRES_NEW)
-  public void track(
-      String eventType, Long userId, String sessionId, Map<String, Object> payload) {
+  public void track(String eventType, Long userId, String sessionId, Map<String, Object> payload) {
     try {
       AnalyticsEvent event = new AnalyticsEvent();
       event.setEventType(eventType);
@@ -71,8 +70,7 @@ public class AnalyticsEventService {
   }
 
   /** User 객체 받는 편의 오버로드. */
-  public void track(
-      String eventType, User user, String sessionId, Map<String, Object> payload) {
+  public void track(String eventType, User user, String sessionId, Map<String, Object> payload) {
     track(eventType, user != null ? user.getId() : null, sessionId, payload);
   }
 

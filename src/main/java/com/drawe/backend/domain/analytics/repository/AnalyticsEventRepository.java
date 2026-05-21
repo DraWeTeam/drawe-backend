@@ -9,8 +9,7 @@ public interface AnalyticsEventRepository extends JpaRepository<AnalyticsEvent, 
 
   List<AnalyticsEvent> findBySessionIdOrderByCreatedAtAsc(String sessionId);
 
-  List<AnalyticsEvent> findByUserIdAndCreatedAtAfterOrderByCreatedAtAsc(
-      Long userId, Instant after);
+  List<AnalyticsEvent> findByUserIdAndCreatedAtAfterOrderByCreatedAtAsc(Long userId, Instant after);
 
   long countByEventTypeAndCreatedAtAfter(String eventType, Instant after);
 }

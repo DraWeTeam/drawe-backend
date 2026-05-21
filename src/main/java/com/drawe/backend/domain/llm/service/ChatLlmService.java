@@ -4,6 +4,8 @@ import com.drawe.backend.domain.ChatSession;
 import com.drawe.backend.domain.LlmMessage;
 import com.drawe.backend.domain.Project;
 import com.drawe.backend.domain.User;
+import com.drawe.backend.domain.analytics.AnalyticsEventType;
+import com.drawe.backend.domain.analytics.service.AnalyticsEventService;
 import com.drawe.backend.domain.enums.LlmCallStatus;
 import com.drawe.backend.domain.enums.LlmProvider;
 import com.drawe.backend.domain.enums.MessageRole;
@@ -18,15 +20,13 @@ import com.drawe.backend.domain.search.dto.ImageResult;
 import com.drawe.backend.domain.search.dto.SearchRequest;
 import com.drawe.backend.domain.search.dto.SearchResponse;
 import com.drawe.backend.domain.search.service.SearchService;
-import com.drawe.backend.domain.analytics.AnalyticsEventType;
-import com.drawe.backend.domain.analytics.service.AnalyticsEventService;
 import com.drawe.backend.global.config.LlmProperties;
 import com.drawe.backend.global.error.CustomException;
 import com.drawe.backend.global.error.ErrorCode;
 import java.time.Instant;
 import java.util.ArrayList;
-import java.util.List;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.stream.Collectors;
@@ -54,7 +54,6 @@ public class ChatLlmService {
   private final UserPrefSummaryService userPrefSummaryService;
   private final AnalyticsEventService analyticsEventService;
 
-
   @Transactional
   public ChatResponse chat(User user, Long projectId, ChatRequest request) {
     Project project = loadProjectAuthorized(user, projectId);
@@ -62,11 +61,8 @@ public class ChatLlmService {
     ChatSession session = resolveOrCreateSession(user, project, request.sessionId());
 
     if (isNewSession) {
-        analyticsEventService.track(
-                AnalyticsEventType.CHAT_START,
-                user,
-                session.getId(),
-                Map.of("project_id", projectId));
+      analyticsEventService.track(
+          AnalyticsEventType.CHAT_START, user, session.getId(), Map.of("project_id", projectId));
     }
 
     ImageInputResolver.Resolved image = imageInputResolver.resolve(user, request.imageUrl());
@@ -77,7 +73,8 @@ public class ChatLlmService {
 
     // 검색 결정 + references 처리
     ExtractionResult decision = keywordExtractor.extract(request.message(), history);
-    List<ImageResult> references = handleSearchDecision(user, project, session.getId(), request.message(), decision);
+    List<ImageResult> references =
+        handleSearchDecision(user, project, session.getId(), request.message(), decision);
 
     // references context 추가
     if (!references.isEmpty()) {
@@ -134,21 +131,22 @@ public class ChatLlmService {
 
       Map<String, Object> successPayload = new HashMap<>();
       successPayload.put("latency_ms", result.latencyMs());
-      successPayload.put("response_length", result.content() != null ? result.content().length() : 0);
+      successPayload.put(
+          "response_length", result.content() != null ? result.content().length() : 0);
       successPayload.put("provider", provider.name());
       successPayload.put("model", result.model());
       successPayload.put("reference_count", refItems.size());
       successPayload.put("has_image_input", image.hasImage());
       analyticsEventService.track(
-              AnalyticsEventType.CHAT_SUCCESS, user, session.getId(), successPayload);
+          AnalyticsEventType.CHAT_SUCCESS, user, session.getId(), successPayload);
 
       return new ChatResponse(
-         session.getId(),
-         "guide",
-         result.content(),
-         convertToReferenceItems(references),
-         decision.action().name(), // "NEW_SEARCH" | "KEEP" | "SKIP"
-         null);
+          session.getId(),
+          "guide",
+          result.content(),
+          convertToReferenceItems(references),
+          decision.action().name(), // "NEW_SEARCH" | "KEEP" | "SKIP"
+          null);
     } catch (CustomException e) {
       persistFailure(assistantMsg, e);
       trackError(user, session.getId(), provider, e);
@@ -162,7 +160,7 @@ public class ChatLlmService {
   }
 
   private List<ImageResult> handleSearchDecision(
-          User user, Project project, String sessionId, String message, ExtractionResult decision) {
+      User user, Project project, String sessionId, String message, ExtractionResult decision) {
 
     switch (decision.action()) {
       case NEW_SEARCH:
@@ -208,7 +206,7 @@ public class ChatLlmService {
                 r.mood());
           }
 
-            // 추적용 payload 미리 생성
+          // 추적용 payload 미리 생성
           Map<String, Object> searchPayload = new HashMap<>();
           searchPayload.put("keyword", decision.keywords());
           searchPayload.put("user_message", message);
@@ -228,7 +226,7 @@ public class ChatLlmService {
             searchPayload.put("blocked", true);
             searchPayload.put("blocked_reason", "low_score");
             analyticsEventService.track(
-                    AnalyticsEventType.SEARCH_BLOCKED, user, sessionId, searchPayload);
+                AnalyticsEventType.SEARCH_BLOCKED, user, sessionId, searchPayload);
             return List.of();
           }
 
@@ -237,7 +235,7 @@ public class ChatLlmService {
 
           searchPayload.put("blocked", false);
           analyticsEventService.track(
-                  AnalyticsEventType.SEARCH_EXECUTED, user, sessionId, searchPayload);
+              AnalyticsEventType.SEARCH_EXECUTED, user, sessionId, searchPayload);
           return result.results();
 
         } catch (Exception e) {
@@ -248,33 +246,31 @@ public class ChatLlmService {
               e.getMessage());
 
           analyticsEventService.track(
-                   AnalyticsEventType.SEARCH_BLOCKED,
-                   user,
-                   sessionId,
-                   Map.of(
-                           "keyword", decision.keywords() != null ? decision.keywords() : "",
-                           "blocked", true,
-                           "blocked_reason", "exception",
-                           "error", e.getMessage() != null ? e.getMessage() : ""));
+              AnalyticsEventType.SEARCH_BLOCKED,
+              user,
+              sessionId,
+              Map.of(
+                  "keyword",
+                  decision.keywords() != null ? decision.keywords() : "",
+                  "blocked",
+                  true,
+                  "blocked_reason",
+                  "exception",
+                  "error",
+                  e.getMessage() != null ? e.getMessage() : ""));
           return List.of();
         }
 
       case KEEP:
         log.info("⏸️  KEEP — 이전 references 유지, user_message=\"{}\"", message);
         analyticsEventService.track(
-                AnalyticsEventType.DECISION_KEEP,
-                user,
-                sessionId,
-                Map.of("user_message", message));
+            AnalyticsEventType.DECISION_KEEP, user, sessionId, Map.of("user_message", message));
         return List.of();
 
       case SKIP:
         log.info("⏭️  SKIP — 검색 불필요, user_message=\"{}\"", message);
         analyticsEventService.track(
-                AnalyticsEventType.DECISION_SKIP,
-                user,
-                sessionId,
-                Map.of("user_message", message));
+            AnalyticsEventType.DECISION_SKIP, user, sessionId, Map.of("user_message", message));
         return List.of();
 
       default:
@@ -306,16 +302,15 @@ public class ChatLlmService {
   }
 
   private void trackError(User user, String sessionId, LlmProvider provider, Exception e) {
-      Map<String, Object> errorPayload = new HashMap<>();
-      errorPayload.put("error_class", e.getClass().getSimpleName());
-      errorPayload.put("error_msg", safeError(e));
-      errorPayload.put("provider", provider != null ? provider.name() : "unknown");
-      analyticsEventService.track(
-              AnalyticsEventType.CHAT_ERROR, user, sessionId, errorPayload);
+    Map<String, Object> errorPayload = new HashMap<>();
+    errorPayload.put("error_class", e.getClass().getSimpleName());
+    errorPayload.put("error_msg", safeError(e));
+    errorPayload.put("provider", provider != null ? provider.name() : "unknown");
+    analyticsEventService.track(AnalyticsEventType.CHAT_ERROR, user, sessionId, errorPayload);
   }
 
   private double round3(double v) {
-      return Math.round(v * 1000.0) / 1000.0;
+    return Math.round(v * 1000.0) / 1000.0;
   }
 
   private Project loadProjectAuthorized(User user, Long projectId) {
