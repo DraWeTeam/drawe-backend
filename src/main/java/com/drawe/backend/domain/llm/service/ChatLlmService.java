@@ -4,6 +4,8 @@ import com.drawe.backend.domain.ChatSession;
 import com.drawe.backend.domain.LlmMessage;
 import com.drawe.backend.domain.Project;
 import com.drawe.backend.domain.User;
+import com.drawe.backend.domain.analytics.AnalyticsEventType;
+import com.drawe.backend.domain.analytics.service.AnalyticsEventService;
 import com.drawe.backend.domain.enums.LlmCallStatus;
 import com.drawe.backend.domain.enums.LlmProvider;
 import com.drawe.backend.domain.enums.MessageRole;
@@ -23,7 +25,9 @@ import com.drawe.backend.global.error.CustomException;
 import com.drawe.backend.global.error.ErrorCode;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
@@ -48,28 +52,32 @@ public class ChatLlmService {
   private final SearchService searchService;
   private final SearchLogService searchLogService;
   private final UserPrefSummaryService userPrefSummaryService;
+  private final AnalyticsEventService analyticsEventService;
 
   @Transactional
   public ChatResponse chat(User user, Long projectId, ChatRequest request) {
     Project project = loadProjectAuthorized(user, projectId);
+    boolean isNewSession = (request.sessionId() == null || request.sessionId().isBlank());
     ChatSession session = resolveOrCreateSession(user, project, request.sessionId());
+
+    if (isNewSession) {
+      analyticsEventService.track(
+          AnalyticsEventType.CHAT_START, user, session.getId(), Map.of("project_id", projectId));
+    }
 
     ImageInputResolver.Resolved image = imageInputResolver.resolve(user, request.imageUrl());
 
-    // 히스토리 먼저 로드 (검색 결정에 사용)
     List<LlmMessage> all = llmMessageRepository.findByChatSessionOrderByCreatedAtAsc(session);
     List<LlmCallContext.Turn> history = trimHistory(all, llmProperties.getMaxHistory());
 
-    // 검색 결정 + references 처리
     ExtractionResult decision = keywordExtractor.extract(request.message(), history);
-    List<ImageResult> references = handleSearchDecision(user, project, request.message(), decision);
+    List<ImageResult> references =
+        handleSearchDecision(user, project, session.getId(), request.message(), decision);
 
-    // references context 추가
     if (!references.isEmpty()) {
       String referenceContext = buildReferenceContext(references);
       history.add(new LlmCallContext.Turn(MessageRole.SYSTEM, referenceContext));
     } else {
-      // 추가 — references 없을 때 명시
       history.add(
           new LlmCallContext.Turn(
               MessageRole.SYSTEM,
@@ -86,7 +94,6 @@ public class ChatLlmService {
     LlmCallContext ctx =
         new LlmCallContext(history, request.message(), image.bytes(), image.mimeType());
 
-    // 사용자 메시지 저장
     LlmMessage userMsg = new LlmMessage();
     userMsg.setChatSession(session);
     userMsg.setRole(MessageRole.USER);
@@ -108,7 +115,6 @@ public class ChatLlmService {
       assistantMsg.setLatencyMs(result.latencyMs());
       assistantMsg.setStatus(LlmCallStatus.SUCCESS);
 
-      // references 저장 — 추가
       List<ChatResponse.ReferenceItem> refItems = convertToReferenceItems(references);
       if (!refItems.isEmpty()) {
         assistantMsg.setReferences(refItems);
@@ -117,25 +123,54 @@ public class ChatLlmService {
       llmMessageRepository.save(assistantMsg);
       session.setLastActive(Instant.now());
 
+      Map<String, Object> successPayload = new HashMap<>();
+      successPayload.put("latency_ms", result.latencyMs());
+      successPayload.put(
+          "response_length", result.content() != null ? result.content().length() : 0);
+      successPayload.put("provider", provider.name());
+      successPayload.put("model", result.model());
+      successPayload.put("reference_count", refItems.size());
+      successPayload.put("has_image_input", image.hasImage());
+      analyticsEventService.track(
+          AnalyticsEventType.CHAT_SUCCESS, user, session.getId(), successPayload);
+
       return new ChatResponse(
           session.getId(),
           "guide",
           result.content(),
           convertToReferenceItems(references),
-          decision.action().name(), // "NEW_SEARCH" | "KEEP" | "SKIP"
+          decision.action().name(),
           null);
     } catch (CustomException e) {
       persistFailure(assistantMsg, e);
+      trackError(user, session.getId(), provider, e);
       throw e;
     } catch (Exception e) {
-      log.error("LLM 호출 실패 session={} provider={}", session.getId(), provider, e);
+      log.error(
+          "LLM 호출 실패 session={} provider={} error_class={}",
+          session.getId(),
+          provider,
+          e.getClass().getSimpleName());
       persistFailure(assistantMsg, e);
+      trackError(user, session.getId(), provider, e);
       throw new CustomException(ErrorCode.AI_SERVICE_ERROR);
     }
   }
 
+  private void trackError(User user, String sessionId, LlmProvider provider, Exception e) {
+    Map<String, Object> errorPayload = new HashMap<>();
+    errorPayload.put("error_class", e.getClass().getSimpleName());
+    errorPayload.put(
+        "error_code",
+        e instanceof CustomException ce ? ce.getErrorCode().name() : "AI_SERVICE_ERROR");
+    errorPayload.put("provider", provider != null ? provider.name() : "unknown");
+    analyticsEventService.track(AnalyticsEventType.CHAT_ERROR, user, sessionId, errorPayload);
+  }
+
   private List<ImageResult> handleSearchDecision(
-      User user, Project project, String message, ExtractionResult decision) {
+      User user, Project project, String sessionId, String message, ExtractionResult decision) {
+
+    int messageLength = message != null ? message.length() : 0;
 
     switch (decision.action()) {
       case NEW_SEARCH:
@@ -144,7 +179,6 @@ public class ChatLlmService {
           searchLogService.log(
               user, project, message, decision.keywords(), result.results(), "rag_chat");
 
-          // 점수 통계 계산
           double avgScore =
               result.results().stream()
                   .mapToDouble(r -> r.score().doubleValue())
@@ -157,10 +191,9 @@ public class ChatLlmService {
           double minScore =
               result.results().stream().mapToDouble(r -> r.score().doubleValue()).min().orElse(0.0);
 
-          // 상세 로그 — 사용자 메시지 + 키워드 + 점수 분포
           log.info("========== 검색 분석 ==========");
           log.info("user_id: {}", user.getId());
-          log.info("user_message: \"{}\"", message);
+          log.info("session_id: {}", sessionId);
           log.info("extracted_keywords: {}", decision.keywords());
           log.info(
               "score_stats: avg={}, max={}, min={}, count={}",
@@ -169,7 +202,6 @@ public class ChatLlmService {
               String.format("%.3f", minScore),
               result.results().size());
 
-          // 각 결과의 점수와 태그 로그
           for (int i = 0; i < result.results().size(); i++) {
             ImageResult r = result.results().get(i);
             log.info(
@@ -181,40 +213,81 @@ public class ChatLlmService {
                 r.mood());
           }
 
-          // 안전장치 결정
+          Map<String, Object> searchPayload = new HashMap<>();
+          searchPayload.put("keyword", decision.keywords());
+          searchPayload.put("message_length", messageLength);
+          searchPayload.put("result_count", result.results().size());
+          searchPayload.put("avg_score", round3(avgScore));
+          searchPayload.put("max_score", round3(maxScore));
+          searchPayload.put("min_score", round3(minScore));
+
           if (avgScore < 0.2 || maxScore < 0.22) {
             log.warn(
                 "❌ 무관 결과 판단: 검색 결과 차단 (avg={} < 0.2 || max={} < 0.22)",
                 String.format("%.3f", avgScore),
                 String.format("%.3f", maxScore));
             log.info("================================");
+
+            searchPayload.put("blocked", true);
+            searchPayload.put("blocked_reason", "low_score");
+            analyticsEventService.track(
+                AnalyticsEventType.SEARCH_BLOCKED, user, sessionId, searchPayload);
             return List.of();
           }
 
           log.info("✅ 유효 결과: {}개 references 반환", result.results().size());
           log.info("================================");
+
+          searchPayload.put("blocked", false);
+          analyticsEventService.track(
+              AnalyticsEventType.SEARCH_EXECUTED, user, sessionId, searchPayload);
           return result.results();
 
         } catch (Exception e) {
           log.error(
-              "검색 실패: message=\"{}\", keywords={}, error={}",
-              message,
+              "검색 실패: keywords={}, error_class={}",
               decision.keywords(),
-              e.getMessage());
+              e.getClass().getSimpleName());
+
+          Map<String, Object> errorPayload = new HashMap<>();
+          errorPayload.put("keyword", decision.keywords() != null ? decision.keywords() : "");
+          errorPayload.put("message_length", messageLength);
+          errorPayload.put("blocked", true);
+          errorPayload.put("blocked_reason", "exception");
+          errorPayload.put("error_class", e.getClass().getSimpleName());
+          errorPayload.put(
+              "error_code",
+              e instanceof CustomException ce ? ce.getErrorCode().name() : "SEARCH_FAILED");
+          analyticsEventService.track(
+              AnalyticsEventType.SEARCH_BLOCKED, user, sessionId, errorPayload);
           return List.of();
         }
 
       case KEEP:
-        log.info("⏸️  KEEP — 이전 references 유지, user_message=\"{}\"", message);
+        log.info("⏸️  KEEP — 이전 references 유지 (session={})", sessionId);
+        analyticsEventService.track(
+            AnalyticsEventType.DECISION_KEEP,
+            user,
+            sessionId,
+            Map.of("message_length", messageLength));
         return List.of();
 
       case SKIP:
-        log.info("⏭️  SKIP — 검색 불필요, user_message=\"{}\"", message);
+        log.info("⏭️  SKIP — 검색 불필요 (session={})", sessionId);
+        analyticsEventService.track(
+            AnalyticsEventType.DECISION_SKIP,
+            user,
+            sessionId,
+            Map.of("message_length", messageLength));
         return List.of();
 
       default:
         return List.of();
     }
+  }
+
+  private double round3(double v) {
+    return Math.round(v * 1000.0) / 1000.0;
   }
 
   @Transactional(readOnly = true)
@@ -343,7 +416,6 @@ public class ChatLlmService {
   }
 
   private LlmProvider resolveProvider(User user) {
-    // 플랜 기반 라우팅: PAID → CLAUDE, FREE → GROK
     UserPlan plan = user.getPlan();
     if (plan == UserPlan.PAID) {
       return LlmProvider.CLAUDE;
@@ -393,7 +465,6 @@ public class ChatLlmService {
     return msg.length() > 1000 ? msg.substring(0, 1000) : msg;
   }
 
-  /** 검색 결과를 LLM에게 줄 system 메시지로 포맷팅 LLM이 응답에서 [1], [2] 형식으로 인용하도록 지시. */
   private String buildReferenceContext(List<ImageResult> references) {
     StringBuilder sb = new StringBuilder();
     sb.append("[참고 이미지]\n");
@@ -405,7 +476,6 @@ public class ChatLlmService {
       sb.append("[").append(i + 1).append("] ");
       sb.append("유사도: ").append(String.format("%.2f", ref.score()));
 
-      // 카테고리 한 줄로
       if (ref.technique() != null || ref.subject() != null || ref.mood() != null) {
         sb.append(" (");
         if (ref.technique() != null) {
@@ -421,12 +491,10 @@ public class ChatLlmService {
       }
       sb.append("\n");
 
-      // utility (구체적 용도)
       if (ref.utility() != null && !ref.utility().isEmpty()) {
         sb.append("    용도: ").append(String.join(", ", ref.utility())).append("\n");
       }
 
-      // rawTags — 핵심 정보 (10개 제한)
       if (ref.rawTags() != null && !ref.rawTags().isEmpty()) {
         String topTags = ref.rawTags().stream().limit(10).collect(Collectors.joining(", "));
         sb.append("    태그: ").append(topTags).append("\n");
@@ -442,7 +510,6 @@ public class ChatLlmService {
     return sb.toString();
   }
 
-  /** SearchService의 ImageResult를 ChatResponse의 ReferenceItem으로 변환. */
   private List<ChatResponse.ReferenceItem> convertToReferenceItems(List<ImageResult> results) {
     return results.stream()
         .map(
