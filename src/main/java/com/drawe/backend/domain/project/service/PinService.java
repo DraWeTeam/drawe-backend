@@ -48,7 +48,7 @@ public class PinService {
     }
 
     if (pins.size() >= MAX_PIN_SLOTS) {
-      throw new CustomException(ErrorCode.PIN_SLOT_FUll);
+      throw new CustomException(ErrorCode.PIN_SLOT_FULL);
     }
 
     pins.add(imageId);
@@ -75,7 +75,7 @@ public class PinService {
 
     List<Long> pinIds = project.getPinnedImageIds();
     if (pinIds == null || pinIds.isEmpty()) {
-      return new PinListResponse(new ArrayList<>(), 0, 0);
+      return new PinListResponse(Collections.emptyList(), 0, MAX_PIN_SLOTS);
     }
 
     // 이미지 메타 조회
