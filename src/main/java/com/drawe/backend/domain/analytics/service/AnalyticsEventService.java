@@ -24,7 +24,9 @@ import org.springframework.transaction.annotation.Transactional;
  *
  * <p>이벤트 저장 실패는 비즈니스 로직에 영향 X. 에러만 로깅하고 계속 진행.
  *
- * <p>트랜잭션은 REQUIRES_NEW로 분리 — 호출 측 트랜잭션 롤백 시에도 이벤트는 남도록.
+ * <p><b>트랜잭션 분리</b>: 모든 public 오버로드에 {@code @Transactional(REQUIRES_NEW)} 적용. 호출 측 트랜잭션 롤백 시에도 이벤트는
+ * 별도 트랜잭션으로 저장됨. Spring AOP proxy 기반이므로 자기호출(self-invocation) 방지를 위해 실제 작업은 private {@link
+ * #doTrack}에 위임.
  */
 @Slf4j
 @Service
@@ -44,6 +46,36 @@ public class AnalyticsEventService {
    */
   @Transactional(propagation = Propagation.REQUIRES_NEW)
   public void track(String eventType, Long userId, String sessionId, Map<String, Object> payload) {
+    doTrack(eventType, userId, sessionId, payload);
+  }
+
+  /** payload 없는 단순 이벤트용 오버로드. */
+  @Transactional(propagation = Propagation.REQUIRES_NEW)
+  public void track(String eventType, Long userId, String sessionId) {
+    doTrack(eventType, userId, sessionId, Map.of());
+  }
+
+  /** User 객체 받는 편의 오버로드. */
+  @Transactional(propagation = Propagation.REQUIRES_NEW)
+  public void track(String eventType, User user, String sessionId, Map<String, Object> payload) {
+    doTrack(eventType, user != null ? user.getId() : null, sessionId, payload);
+  }
+
+  /** User 객체 + payload 없는 오버로드. */
+  @Transactional(propagation = Propagation.REQUIRES_NEW)
+  public void track(String eventType, User user, String sessionId) {
+    doTrack(eventType, user != null ? user.getId() : null, sessionId, Map.of());
+  }
+
+  /**
+   * 실제 저장 로직. 모든 public {@code track(...)} 오버로드가 위임.
+   *
+   * <p>private이므로 직접 호출 불가 — 외부에서는 트랜잭션이 적용된 public 메서드만 진입 가능.
+   *
+   * <p>이 메서드 자체는 {@code @Transactional} 없음. 호출 측 (public track 메서드)이 시작한 REQUIRES_NEW 트랜잭션에 참여한다.
+   */
+  private void doTrack(
+      String eventType, Long userId, String sessionId, Map<String, Object> payload) {
     try {
       AnalyticsEvent event = new AnalyticsEvent();
       event.setEventType(eventType);
@@ -62,21 +94,6 @@ public class AnalyticsEventService {
       // 분석 이벤트 실패가 비즈니스를 중단시키지 않게.
       log.warn("Analytics event 저장 실패: type={}, error={}", eventType, e.getMessage());
     }
-  }
-
-  /** payload 없는 단순 이벤트용 오버로드. */
-  public void track(String eventType, Long userId, String sessionId) {
-    track(eventType, userId, sessionId, Map.of());
-  }
-
-  /** User 객체 받는 편의 오버로드. */
-  public void track(String eventType, User user, String sessionId, Map<String, Object> payload) {
-    track(eventType, user != null ? user.getId() : null, sessionId, payload);
-  }
-
-  /** User 객체 + payload 없는 오버로드. */
-  public void track(String eventType, User user, String sessionId) {
-    track(eventType, user != null ? user.getId() : null, sessionId, Map.of());
   }
 
   private String serializePayload(Map<String, Object> payload) {
