@@ -131,7 +131,7 @@ public class ClaudeService implements LlmService {
       }
       return sb.toString();
     } catch (Exception e) {
-      log.error("Failed to parse Claude response: {}", response, e);
+      log.error("Failed to parse Claude response: error_class={}", e.getClass().getSimpleName());
       throw new CustomException(ErrorCode.AI_SERVICE_ERROR);
     }
   }

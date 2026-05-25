@@ -5,6 +5,8 @@ import jakarta.persistence.*;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Size;
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
 import lombok.Getter;
 import lombok.Setter;
@@ -56,6 +58,10 @@ public class Project {
   @Enumerated(EnumType.STRING)
   @Column(name = "status", nullable = false)
   private ProjectStatus status = ProjectStatus.IN_PROGRESS;
+
+  @JdbcTypeCode(SqlTypes.JSON)
+  @Column(name = "pinned_image_ids", columnDefinition = "JSON")
+  private List<Long> pinnedImageIds = new ArrayList<>();
 
   @Size(max = 500)
   @Column(name = "drawing_url", length = 500)

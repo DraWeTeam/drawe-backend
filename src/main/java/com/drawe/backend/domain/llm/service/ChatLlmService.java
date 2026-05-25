@@ -1,17 +1,22 @@
 package com.drawe.backend.domain.llm.service;
 
 import com.drawe.backend.domain.ChatSession;
+import com.drawe.backend.domain.Image;
 import com.drawe.backend.domain.LlmMessage;
 import com.drawe.backend.domain.Project;
 import com.drawe.backend.domain.User;
+import com.drawe.backend.domain.analytics.AnalyticsEventType;
+import com.drawe.backend.domain.analytics.service.AnalyticsEventService;
 import com.drawe.backend.domain.enums.LlmCallStatus;
 import com.drawe.backend.domain.enums.LlmProvider;
 import com.drawe.backend.domain.enums.MessageRole;
 import com.drawe.backend.domain.enums.UserPlan;
+import com.drawe.backend.domain.image.service.ImageGenerationService;
 import com.drawe.backend.domain.llm.dto.*;
 import com.drawe.backend.domain.llm.repository.ChatSessionRepository;
 import com.drawe.backend.domain.llm.repository.LlmMessageRepository;
 import com.drawe.backend.domain.log.SearchLogService;
+import com.drawe.backend.domain.onboarding.UserPrefSummaryService;
 import com.drawe.backend.domain.project.repository.ProjectRepository;
 import com.drawe.backend.domain.search.dto.ImageResult;
 import com.drawe.backend.domain.search.dto.SearchRequest;
@@ -22,7 +27,9 @@ import com.drawe.backend.global.error.CustomException;
 import com.drawe.backend.global.error.ErrorCode;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
@@ -46,37 +53,66 @@ public class ChatLlmService {
   private final KeywordExtractor keywordExtractor;
   private final SearchService searchService;
   private final SearchLogService searchLogService;
+  private final ImageGenerationService imageGenerationService;
+  private final UserPrefSummaryService userPrefSummaryService;
+  private final AnalyticsEventService analyticsEventService;
 
   @Transactional
   public ChatResponse chat(User user, Long projectId, ChatRequest request) {
     Project project = loadProjectAuthorized(user, projectId);
+    boolean isNewSession = (request.sessionId() == null || request.sessionId().isBlank());
     ChatSession session = resolveOrCreateSession(user, project, request.sessionId());
+
+    if (isNewSession) {
+      analyticsEventService.track(
+          AnalyticsEventType.CHAT_START, user, session.getId(), Map.of("project_id", projectId));
+    }
 
     ImageInputResolver.Resolved image = imageInputResolver.resolve(user, request.imageUrl());
 
-    // 히스토리 먼저 로드 (검색 결정에 사용)
     List<LlmMessage> all = llmMessageRepository.findByChatSessionOrderByCreatedAtAsc(session);
     List<LlmCallContext.Turn> history = trimHistory(all, llmProperties.getMaxHistory());
 
-    // 검색 결정 + references 처리
+    // 검색 결정
     ExtractionResult decision = keywordExtractor.extract(request.message(), history);
-    List<ImageResult> references = handleSearchDecision(user, project, request.message(), decision);
 
-    // references context 추가
+    // 사용자가 명시적으로 이미지 생성을 요청한 경우 — 검색·LLM 답변 모두 건너뛰고
+    // 바로 Bria 호출해서 응답에 생성된 이미지 url 을 담아 돌려준다.
+    if (decision.action() == ExtractionResult.Action.GENERATE_NOW) {
+      return handleGenerateNow(user, project, session, request, decision);
+    }
+
+    List<ImageResult> references =
+        handleSearchDecision(user, project, session.getId(), request.message(), decision);
+
+    // 검색은 시도했지만 적합한 레퍼런스가 없을 때 AI 이미지 생성을 제안한다.
+    boolean offerGenerate =
+        decision.action() == ExtractionResult.Action.NEW_SEARCH && references.isEmpty();
+
     if (!references.isEmpty()) {
       String referenceContext = buildReferenceContext(references);
       history.add(new LlmCallContext.Turn(MessageRole.SYSTEM, referenceContext));
     } else {
-      // 추가 — references 없을 때 명시
+      // 레퍼런스가 없을 때:
+      // 답변은 짧고 단정한 한 줄로 — "자료가 부족한 것 같아요. AI 이미지로 생성해드릴까요?" 류.
+      // 시스템이 이 답변과 함께 생성 버튼을 자동 노출한다 (offerGenerate=true).
+      // LLM 본인이 이미지를 만든 척하는 표현은 금지.
       history.add(
           new LlmCallContext.Turn(
               MessageRole.SYSTEM,
               "[참고 이미지 안내]\n"
-                  + "이번 답변에는 새로 검색된 참고 이미지가 없습니다.\n"
-                  + "사용자의 질문에 직접 답변하세요.\n"
-                  + "[1], [2] 같은 이미지 인용 표현을 사용하지 마세요.\n"
-                  + "이전 대화에서 언급된 이미지가 있다면 그것만 참고 가능하지만, "
-                  + "새 인용을 만들지 마세요."));
+                  + "이번 답변에는 검색된 참고 이미지가 없습니다.\n"
+                  + "\n"
+                  + "응답 가이드:\n"
+                  + "- 한 줄로 짧게 안내하세요. 예: \"자료가 좀 부족한 것 같아요. AI 이미지로 생성해드릴까요?\"\n"
+                  + "- 사용자가 이미지/레퍼런스를 원했다면 위 톤으로 마무리하면 됩니다.\n"
+                  + "- 시스템이 이 답변에 'AI 이미지 생성' 버튼을 자동으로 노출합니다.\n"
+                  + "\n"
+                  + "금지:\n"
+                  + "- [1], [2] 같은 인용 표현 (지금 참고 이미지가 없음).\n"
+                  + "- 네가 만들지 않은 이미지를 만든 척하는 표현:\n"
+                  + "  \"만들어왔어요\", \"만들어드렸어요\", \"준비해봤어요\", \"여기 이미지요\" 등.\n"
+                  + "- \"잠시만요\", \"어떤 분위기·구도\"처럼 길게 되묻거나 약속을 늘이지 마세요."));
     }
 
     LlmProvider provider = resolveProvider(user);
@@ -84,7 +120,6 @@ public class ChatLlmService {
     LlmCallContext ctx =
         new LlmCallContext(history, request.message(), image.bytes(), image.mimeType());
 
-    // 사용자 메시지 저장
     LlmMessage userMsg = new LlmMessage();
     userMsg.setChatSession(session);
     userMsg.setRole(MessageRole.USER);
@@ -106,7 +141,6 @@ public class ChatLlmService {
       assistantMsg.setLatencyMs(result.latencyMs());
       assistantMsg.setStatus(LlmCallStatus.SUCCESS);
 
-      // references 저장 — 추가
       List<ChatResponse.ReferenceItem> refItems = convertToReferenceItems(references);
       if (!refItems.isEmpty()) {
         assistantMsg.setReferences(refItems);
@@ -115,34 +149,73 @@ public class ChatLlmService {
       llmMessageRepository.save(assistantMsg);
       session.setLastActive(Instant.now());
 
+      // 답변 후처리: LLM 본문에 생성 안내 표현이 있으면 무조건 버튼 노출.
+      // 페르소나로 톤은 자제시켜도 가끔 LLM이 "버튼으로 만들어드릴게요" 류 표현을 하는데,
+      // 그러면 본문은 약속하고 버튼은 안 뜨는 모순이 사용자한테 보임.
+      if (!offerGenerate && mentionsGenerateOffer(result.content())) {
+        offerGenerate = true;
+        log.info("LLM 답변에 생성 안내 표현 감지 → offerGenerate 강제 true: session={}", session.getId());
+      }
+
+      Map<String, Object> successPayload = new HashMap<>();
+      successPayload.put("latency_ms", result.latencyMs());
+      successPayload.put(
+          "response_length", result.content() != null ? result.content().length() : 0);
+      successPayload.put("provider", provider.name());
+      successPayload.put("model", result.model());
+      successPayload.put("reference_count", refItems.size());
+      successPayload.put("has_image_input", image.hasImage());
+      successPayload.put("offer_generate", offerGenerate);
+      analyticsEventService.track(
+          AnalyticsEventType.CHAT_SUCCESS, user, session.getId(), successPayload);
+
       return new ChatResponse(
           session.getId(),
           "guide",
           result.content(),
           convertToReferenceItems(references),
           decision.action().name(), // "NEW_SEARCH" | "KEEP" | "SKIP"
+          offerGenerate,
+          offerGenerate ? request.message() : null,
           null);
     } catch (CustomException e) {
       persistFailure(assistantMsg, e);
+      trackError(user, session.getId(), provider, e);
       throw e;
     } catch (Exception e) {
-      log.error("LLM 호출 실패 session={} provider={}", session.getId(), provider, e);
+      log.error(
+          "LLM 호출 실패 session={} provider={} error_class={}",
+          session.getId(),
+          provider,
+          e.getClass().getSimpleName());
       persistFailure(assistantMsg, e);
+      trackError(user, session.getId(), provider, e);
       throw new CustomException(ErrorCode.AI_SERVICE_ERROR);
     }
   }
 
+  private void trackError(User user, String sessionId, LlmProvider provider, Exception e) {
+    Map<String, Object> errorPayload = new HashMap<>();
+    errorPayload.put("error_class", e.getClass().getSimpleName());
+    errorPayload.put(
+        "error_code",
+        e instanceof CustomException ce ? ce.getErrorCode().name() : "AI_SERVICE_ERROR");
+    errorPayload.put("provider", provider != null ? provider.name() : "unknown");
+    analyticsEventService.track(AnalyticsEventType.CHAT_ERROR, user, sessionId, errorPayload);
+  }
+
   private List<ImageResult> handleSearchDecision(
-      User user, Project project, String message, ExtractionResult decision) {
+      User user, Project project, String sessionId, String message, ExtractionResult decision) {
+
+    int messageLength = message != null ? message.length() : 0;
 
     switch (decision.action()) {
       case NEW_SEARCH:
         try {
-          SearchResponse result = searchService.search(new SearchRequest(decision.keywords(), 6));
+          SearchResponse result = searchService.search(new SearchRequest(decision.keywords(), 10));
           searchLogService.log(
               user, project, message, decision.keywords(), result.results(), "rag_chat");
 
-          // 점수 통계 계산
           double avgScore =
               result.results().stream()
                   .mapToDouble(r -> r.score().doubleValue())
@@ -155,11 +228,12 @@ public class ChatLlmService {
           double minScore =
               result.results().stream().mapToDouble(r -> r.score().doubleValue()).min().orElse(0.0);
 
-          // 상세 로그 — 사용자 메시지 + 키워드 + 점수 분포
           log.info("========== 검색 분석 ==========");
           log.info("user_id: {}", user.getId());
-          log.info("user_message: \"{}\"", message);
-          log.info("extracted_keywords: {}", decision.keywords());
+          log.info("session_id: {}", sessionId);
+          log.info(
+              "keywords_length: {}",
+              decision.keywords() != null ? decision.keywords().length() : 0);
           log.info(
               "score_stats: avg={}, max={}, min={}, count={}",
               String.format("%.3f", avgScore),
@@ -167,52 +241,104 @@ public class ChatLlmService {
               String.format("%.3f", minScore),
               result.results().size());
 
-          // 각 결과의 점수와 태그 로그
           for (int i = 0; i < result.results().size(); i++) {
             ImageResult r = result.results().get(i);
             log.info(
-                "  [{}] score={}, technique={}, subject={}, mood={}",
+                "  [{}] id={}, score={}, technique={}, subject={}, mood={}",
                 i + 1,
+                r.id(),
                 String.format("%.3f", r.score()),
                 r.technique(),
                 r.subject(),
                 r.mood());
           }
 
-          // 안전장치 결정
-          if (avgScore < 0.2 || maxScore < 0.22) {
+          Map<String, Object> searchPayload = new HashMap<>();
+          searchPayload.put("keyword", decision.keywords());
+          searchPayload.put("message_length", messageLength);
+          searchPayload.put("result_count", result.results().size());
+          searchPayload.put("avg_score", round3(avgScore));
+          searchPayload.put("max_score", round3(maxScore));
+          searchPayload.put("min_score", round3(minScore));
+
+          // 검색 결과 image_id 배열 (분석/디버깅용)
+          List<Long> imageIds = result.results().stream().map(ImageResult::id).toList();
+          searchPayload.put("image_ids", imageIds);
+
+          // 점수도 같이 (소수점 3자리)
+          List<Double> scores =
+              result.results().stream()
+                  .map(r -> Math.round(r.score().doubleValue() * 1000.0) / 1000.0)
+                  .toList();
+          searchPayload.put("scores", scores);
+
+          if (avgScore < 0.2 || maxScore < 0.21) {
             log.warn(
-                "❌ 무관 결과 판단: 검색 결과 차단 (avg={} < 0.2 || max={} < 0.22)",
+                "❌ 무관 결과 판단: 검색 결과 차단 (avg={} < 0.2 || max={} < 0.21)",
                 String.format("%.3f", avgScore),
                 String.format("%.3f", maxScore));
             log.info("================================");
+
+            searchPayload.put("blocked", true);
+            searchPayload.put("blocked_reason", "low_score");
+            analyticsEventService.track(
+                AnalyticsEventType.SEARCH_BLOCKED, user, sessionId, searchPayload);
             return List.of();
           }
 
           log.info("✅ 유효 결과: {}개 references 반환", result.results().size());
           log.info("================================");
+
+          searchPayload.put("blocked", false);
+          analyticsEventService.track(
+              AnalyticsEventType.SEARCH_EXECUTED, user, sessionId, searchPayload);
           return result.results();
 
         } catch (Exception e) {
           log.error(
-              "검색 실패: message=\"{}\", keywords={}, error={}",
-              message,
-              decision.keywords(),
-              e.getMessage());
+              "검색 실패: keywords_length={}, error_class={}",
+              decision.keywords() != null ? decision.keywords().length() : 0,
+              e.getClass().getSimpleName());
+
+          Map<String, Object> errorPayload = new HashMap<>();
+          errorPayload.put("keyword", decision.keywords() != null ? decision.keywords() : "");
+          errorPayload.put("message_length", messageLength);
+          errorPayload.put("blocked", true);
+          errorPayload.put("blocked_reason", "exception");
+          errorPayload.put("error_class", e.getClass().getSimpleName());
+          errorPayload.put(
+              "error_code",
+              e instanceof CustomException ce ? ce.getErrorCode().name() : "SEARCH_FAILED");
+          analyticsEventService.track(
+              AnalyticsEventType.SEARCH_BLOCKED, user, sessionId, errorPayload);
           return List.of();
         }
 
       case KEEP:
-        log.info("⏸️  KEEP — 이전 references 유지, user_message=\"{}\"", message);
+        log.info("⏸️  KEEP — 이전 references 유지 (session={})", sessionId);
+        analyticsEventService.track(
+            AnalyticsEventType.DECISION_KEEP,
+            user,
+            sessionId,
+            Map.of("message_length", messageLength));
         return List.of();
 
       case SKIP:
-        log.info("⏭️  SKIP — 검색 불필요, user_message=\"{}\"", message);
+        log.info("⏭️  SKIP — 검색 불필요 (session={})", sessionId);
+        analyticsEventService.track(
+            AnalyticsEventType.DECISION_SKIP,
+            user,
+            sessionId,
+            Map.of("message_length", messageLength));
         return List.of();
 
       default:
         return List.of();
     }
+  }
+
+  private double round3(double v) {
+    return Math.round(v * 1000.0) / 1000.0;
   }
 
   @Transactional(readOnly = true)
@@ -227,6 +353,88 @@ public class ChatLlmService {
     return new ChatHistoryResponse(session.getId(), items);
   }
 
+  /**
+   * GENERATE_NOW 분기 — 사용자가 명시적으로 "만들어줘"라고 했을 때 검색·LLM 답변을 건너뛰고 즉시 Bria 호출.
+   *
+   * <p>일반 chat 경로와 다른 점:
+   *
+   * <ul>
+   *   <li>검색하지 않음 (사용자가 새 이미지를 원했음이 분명함)
+   *   <li>LLM 답변 호출하지 않음 — 답변은 고정 문구로 대체 ("만들어왔어요" 할루시네이션 원천 차단)
+   *   <li>ChatResponse.generatedImage 필드에 새 이미지 정보 포함
+   * </ul>
+   */
+  private ChatResponse handleGenerateNow(
+      User user,
+      Project project,
+      ChatSession session,
+      ChatRequest request,
+      ExtractionResult decision) {
+    // 사용자 메시지 저장
+    LlmMessage userMsg = new LlmMessage();
+    userMsg.setChatSession(session);
+    userMsg.setRole(MessageRole.USER);
+    userMsg.setContent(request.message());
+    userMsg.setHasImage(false);
+    llmMessageRepository.save(userMsg);
+
+    // KeywordExtractor가 추출한 영문 프롬프트로 즉시 생성.
+    // ImageGenerationService 가 내부에서 또 한 번 번역하지만, 영문 입력이면 그대로 통과.
+    Image image = imageGenerationService.generate(user, decision.keywords(), project);
+
+    String assistantText = "요청하신 이미지를 만들어드렸어요. 마음에 드시면 이어서 작업해보시고, 다른 분위기로 바꿔드릴까요?";
+    LlmMessage assistantMsg = new LlmMessage();
+    assistantMsg.setChatSession(session);
+    assistantMsg.setRole(MessageRole.ASSISTANT);
+    assistantMsg.setContent(assistantText);
+    assistantMsg.setHasImage(true);
+    assistantMsg.setImageUrl(image.getUrl());
+    assistantMsg.setStatus(LlmCallStatus.SUCCESS);
+    llmMessageRepository.save(assistantMsg);
+
+    session.setLastActive(Instant.now());
+
+    log.info(
+        "GENERATE_NOW 처리 완료: user={}, imageId={}, prompt_length={}",
+        user.getId(),
+        image.getId(),
+        decision.keywords() != null ? decision.keywords().length() : 0);
+
+    return new ChatResponse(
+        session.getId(),
+        "guide",
+        assistantText,
+        List.of(),
+        decision.action().name(), // "GENERATE_NOW"
+        false,
+        null,
+        new ChatResponse.GeneratedImage(image.getId(), image.getUrl(), decision.keywords()));
+  }
+
+  /** 사용자가 "AI 이미지 만들어주세요" 버튼을 누른 경우 호출. Bria 로 이미지 생성 후 세션에 ASSISTANT 메시지로 기록. */
+  @Transactional
+  public GenerateImageResponse generateImage(
+      User user, Long projectId, String sessionId, GenerateImageRequest request) {
+    Project project = loadProjectAuthorized(user, projectId);
+    ChatSession session = loadSessionAuthorized(user, sessionId, projectId);
+
+    Image image = imageGenerationService.generate(user, request.prompt(), project);
+
+    LlmMessage assistantMsg = new LlmMessage();
+    assistantMsg.setChatSession(session);
+    assistantMsg.setRole(MessageRole.ASSISTANT);
+    assistantMsg.setContent("AI 이미지를 생성했어요. 원하시면 추가 수정 방향을 알려주세요.");
+    assistantMsg.setHasImage(true);
+    assistantMsg.setImageUrl(image.getUrl());
+    assistantMsg.setStatus(LlmCallStatus.SUCCESS);
+    llmMessageRepository.save(assistantMsg);
+
+    session.setLastActive(Instant.now());
+
+    return new GenerateImageResponse(
+        session.getId(), image.getId(), image.getUrl(), request.prompt());
+  }
+
   @Transactional
   public void resetSession(User user, Long projectId, String sessionId) {
     loadProjectAuthorized(user, projectId);
@@ -236,6 +444,14 @@ public class ChatLlmService {
         messages.stream().filter(m -> m.getRole() != MessageRole.SYSTEM).toList();
     llmMessageRepository.deleteAll(nonSystem);
     session.setLastActive(Instant.now());
+  }
+
+  @Transactional(readOnly = true)
+  public String getLatestSessionId(User user, Long projectId) {
+    return chatSessionRepository
+        .findTopByUserAndProjectIdOrderByLastActiveDesc(user, projectId)
+        .map(ChatSession::getId)
+        .orElse(null);
   }
 
   private Project loadProjectAuthorized(User user, Long projectId) {
@@ -283,6 +499,21 @@ public class ChatLlmService {
     persona.setHasImage(false);
     llmMessageRepository.save(persona);
 
+    String userPrefs = userPrefSummaryService.buildSummary(user);
+    if (!userPrefs.isBlank()) {
+      LlmMessage prefsMsg = new LlmMessage();
+      prefsMsg.setChatSession(session);
+      prefsMsg.setRole(MessageRole.SYSTEM);
+      prefsMsg.setContent(userPrefs);
+      prefsMsg.setHasImage(false);
+      llmMessageRepository.save(prefsMsg);
+      log.info(
+          "세션 생성 시 사용자 선호 인젝션: userId={}, sessionId={}, prefsLength={}",
+          user.getId(),
+          session.getId(),
+          userPrefs.length());
+    }
+
     String projectContext = buildProjectContext(project);
     if (projectContext != null) {
       LlmMessage context = new LlmMessage();
@@ -325,8 +556,28 @@ public class ChatLlmService {
     return s != null && !s.isBlank();
   }
 
+  // 한글/영문 변형까지 묶어 한 번에 잡는다. 너무 좁으면 누락, 너무 넓으면 일반 대화에서 오탐.
+  // 핵심 키워드: "생성" + "버튼", 또는 "만들어드릴" / "만들어 드릴" / "생성해드릴", "AI 이미지" + 동작어.
+  private static final java.util.regex.Pattern GENERATE_OFFER_PATTERN =
+      java.util.regex.Pattern.compile(
+          "(AI\\s*이미지[^\\n]{0,15}생성)"
+              + "|(생성\\s*버튼)"
+              + "|(만들어\\s*드릴게요)"
+              + "|(만들어드릴게요)"
+              + "|(생성해\\s*드릴까요)"
+              + "|(생성해드릴까요)"
+              + "|(만들어\\s*드릴까요)"
+              + "|(만들어드릴까요)",
+          java.util.regex.Pattern.CASE_INSENSITIVE);
+
+  private boolean mentionsGenerateOffer(String llmAnswer) {
+    if (llmAnswer == null || llmAnswer.isBlank()) {
+      return false;
+    }
+    return GENERATE_OFFER_PATTERN.matcher(llmAnswer).find();
+  }
+
   private LlmProvider resolveProvider(User user) {
-    // 플랜 기반 라우팅: PAID → CLAUDE, FREE → GROK
     UserPlan plan = user.getPlan();
     if (plan == UserPlan.PAID) {
       return LlmProvider.CLAUDE;
@@ -376,7 +627,6 @@ public class ChatLlmService {
     return msg.length() > 1000 ? msg.substring(0, 1000) : msg;
   }
 
-  /** 검색 결과를 LLM에게 줄 system 메시지로 포맷팅 LLM이 응답에서 [1], [2] 형식으로 인용하도록 지시. */
   private String buildReferenceContext(List<ImageResult> references) {
     StringBuilder sb = new StringBuilder();
     sb.append("[참고 이미지]\n");
@@ -388,7 +638,6 @@ public class ChatLlmService {
       sb.append("[").append(i + 1).append("] ");
       sb.append("유사도: ").append(String.format("%.2f", ref.score()));
 
-      // 카테고리 한 줄로
       if (ref.technique() != null || ref.subject() != null || ref.mood() != null) {
         sb.append(" (");
         if (ref.technique() != null) {
@@ -404,12 +653,10 @@ public class ChatLlmService {
       }
       sb.append("\n");
 
-      // utility (구체적 용도)
       if (ref.utility() != null && !ref.utility().isEmpty()) {
         sb.append("    용도: ").append(String.join(", ", ref.utility())).append("\n");
       }
 
-      // rawTags — 핵심 정보 (10개 제한)
       if (ref.rawTags() != null && !ref.rawTags().isEmpty()) {
         String topTags = ref.rawTags().stream().limit(10).collect(Collectors.joining(", "));
         sb.append("    태그: ").append(topTags).append("\n");
@@ -421,11 +668,15 @@ public class ChatLlmService {
     sb.append("- 예: \"[1]번 이미지처럼 부드러운 색감을 표현하려면...\"\n");
     sb.append("- 모든 이미지를 다 언급할 필요는 없습니다. 관련 있는 것만 인용하세요.\n");
     sb.append("- 태그 정보를 활용해 구체적인 조언을 해주세요.\n");
+    sb.append(
+        "- 네가 직접 추가 이미지를 만들어왔다고 말하지 마세요 "
+            + "(\"더 그려왔어요\", \"만들어둔 게 있어요\" 같은 가짜 결과 금지).\n"
+            + "- 만약 사용자가 만족 못 하면 짧게 한 줄 안내: "
+            + "\"원하시면 AI 이미지로 새로 생성해드릴까요?\" 정도.\n");
 
     return sb.toString();
   }
 
-  /** SearchService의 ImageResult를 ChatResponse의 ReferenceItem으로 변환. */
   private List<ChatResponse.ReferenceItem> convertToReferenceItems(List<ImageResult> results) {
     return results.stream()
         .map(

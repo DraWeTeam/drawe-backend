@@ -6,6 +6,7 @@ services:
     environment:
       - DB_HOST=drawe_db
       - REDIS_HOST=drawe_redis
+      - SERVER_PORT=8080
     ports:
       - "8080:8080"
     networks:
