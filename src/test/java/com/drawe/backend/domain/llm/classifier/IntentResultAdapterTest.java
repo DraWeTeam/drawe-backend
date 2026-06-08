@@ -65,9 +65,29 @@ class IntentResultAdapterTest {
   }
 
   @Test
-  @DisplayName("KEEP 은 현재 006 미분류 — 미술 의도 세분류(001~004)는 ②-2차")
-  void keepStaysUnclassified() {
+  @DisplayName("미분류 KEEP → 006")
+  void keepWithoutArtIntent() {
     assertThat(adapter.adapt(ExtractionResult.keep(), false, List.of(), false).code())
         .isEqualTo(IntentCode.KEEP);
+  }
+
+  @Test
+  @DisplayName("미술 의도 세분류된 KEEP → 001~004 (②-2차)")
+  void keepWithArtIntent() {
+    assertThat(adapter.adapt(ExtractionResult.keep(IntentCode.COMPOSITION), false, List.of(), false).code())
+        .isEqualTo(IntentCode.COMPOSITION);
+    assertThat(adapter.adapt(ExtractionResult.keep(IntentCode.LIGHTING), false, List.of(), false).code())
+        .isEqualTo(IntentCode.LIGHTING);
+    assertThat(adapter.adapt(ExtractionResult.keep(IntentCode.COLOR), false, List.of(), false).code())
+        .isEqualTo(IntentCode.COLOR);
+    assertThat(adapter.adapt(ExtractionResult.keep(IntentCode.TECHNIQUE), false, List.of(), false).code())
+        .isEqualTo(IntentCode.TECHNIQUE);
+  }
+
+  @Test
+  @DisplayName("미술 의도 분류된 KEEP 도 tier 는 그대로 (Grok 결정이면 LLM_LIGHT)")
+  void keepArtIntentTier() {
+    assertThat(adapter.adapt(ExtractionResult.keep(IntentCode.COLOR), false, List.of(), false).tier())
+        .isEqualTo(IntentResult.Tier.LLM_LIGHT);
   }
 }

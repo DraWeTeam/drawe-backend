@@ -33,16 +33,19 @@ public class IntentResultAdapter {
       List<Integer> referencedImages,
       boolean hasUploadedImage) {
     IntentResult.Tier tier = ruleDecided ? IntentResult.Tier.RULE : IntentResult.Tier.LLM_LIGHT;
-    IntentCode code = toCode(decision.action());
+    IntentCode code = toCode(decision);
     return new IntentResult(
         code, referencedImages == null ? List.of() : referencedImages, hasUploadedImage, tier);
   }
 
-  /** 4 Action → IntentCode. KEEP 은 006(미분류) — 미술 의도 세분류는 ②-2차. */
-  private IntentCode toCode(ExtractionResult.Action action) {
-    return switch (action) {
+  /**
+   * 4 Action → IntentCode. KEEP 은 미술 의도 세분류({@code artIntent})가 있으면 001~004, 없으면 006(미분류) 으로
+   * 매핑한다 (②-2차). 룰이 결정한 KEEP 은 artIntent 가 없으니 자연히 006.
+   */
+  private IntentCode toCode(ExtractionResult decision) {
+    return switch (decision.action()) {
       case NEW_SEARCH -> IntentCode.NEW_SEARCH; // 005
-      case KEEP -> IntentCode.KEEP; // 006 (001~004 세분류는 ②-2차)
+      case KEEP -> decision.artIntent() != null ? decision.artIntent() : IntentCode.KEEP; // 001~004 or 006
       case SKIP -> IntentCode.SKIP; // 007
       case GENERATE_NOW -> IntentCode.GENERATE; // 008
     };
