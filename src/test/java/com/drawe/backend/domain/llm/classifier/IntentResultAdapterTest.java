@@ -1,0 +1,73 @@
+package com.drawe.backend.domain.llm.classifier;
+
+import static org.assertj.core.api.Assertions.assertThat;
+
+import com.drawe.backend.domain.llm.contract.IntentCode;
+import com.drawe.backend.domain.llm.contract.IntentResult;
+import com.drawe.backend.domain.llm.dto.ExtractionResult;
+import java.util.List;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Test;
+
+/**
+ * {@link IntentResultAdapter} 단위 테스트 — 4 Action → IntentCode 매핑 + tier 판정 + 슬롯 전달.
+ * 설계: {@code docs/decisions/S1A-intent-classifier-design.md}.
+ */
+class IntentResultAdapterTest {
+
+  private final IntentResultAdapter adapter = new IntentResultAdapter();
+
+  @Test
+  @DisplayName("4 Action → IntentCode 매핑")
+  void actionToCode() {
+    assertThat(adapter.adapt(ExtractionResult.newSearch("k"), true, List.of(), false).code())
+        .isEqualTo(IntentCode.NEW_SEARCH);
+    assertThat(adapter.adapt(ExtractionResult.keep(), false, List.of(), false).code())
+        .isEqualTo(IntentCode.KEEP);
+    assertThat(adapter.adapt(ExtractionResult.skip(), true, List.of(), false).code())
+        .isEqualTo(IntentCode.SKIP);
+    assertThat(adapter.adapt(ExtractionResult.generateNow("p"), true, List.of(), false).code())
+        .isEqualTo(IntentCode.GENERATE);
+  }
+
+  @Test
+  @DisplayName("ruleDecided=true → tier=RULE, false → tier=LLM_LIGHT")
+  void tierByDecider() {
+    assertThat(adapter.adapt(ExtractionResult.skip(), true, List.of(), false).tier())
+        .isEqualTo(IntentResult.Tier.RULE);
+    assertThat(adapter.adapt(ExtractionResult.newSearch("k"), false, List.of(), false).tier())
+        .isEqualTo(IntentResult.Tier.LLM_LIGHT);
+  }
+
+  @Test
+  @DisplayName("앵커 슬롯(referencedImages) 전달")
+  void passesAnchorSlot() {
+    IntentResult r = adapter.adapt(ExtractionResult.newSearch("k"), false, List.of(2, 3), false);
+    assertThat(r.referencedImages()).containsExactly(2, 3);
+    assertThat(r.hasReferencedImages()).isTrue();
+  }
+
+  @Test
+  @DisplayName("null referencedImages → 빈 리스트 (불변)")
+  void nullAnchorBecomesEmpty() {
+    IntentResult r = adapter.adapt(ExtractionResult.skip(), true, null, false);
+    assertThat(r.referencedImages()).isEmpty();
+    assertThat(r.hasReferencedImages()).isFalse();
+  }
+
+  @Test
+  @DisplayName("hasUploadedImage 플래그 전달 (010 트리거 정보)")
+  void passesUploadFlag() {
+    assertThat(adapter.adapt(ExtractionResult.keep(), false, List.of(), true).hasUploadedImage())
+        .isTrue();
+    assertThat(adapter.adapt(ExtractionResult.keep(), false, List.of(), false).hasUploadedImage())
+        .isFalse();
+  }
+
+  @Test
+  @DisplayName("KEEP 은 현재 006 미분류 — 미술 의도 세분류(001~004)는 ②-2차")
+  void keepStaysUnclassified() {
+    assertThat(adapter.adapt(ExtractionResult.keep(), false, List.of(), false).code())
+        .isEqualTo(IntentCode.KEEP);
+  }
+}
