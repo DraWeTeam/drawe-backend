@@ -6,6 +6,7 @@ import com.drawe.backend.domain.Project;
 import com.drawe.backend.domain.User;
 import com.drawe.backend.domain.image.repository.ImageDraweTagRepository;
 import com.drawe.backend.domain.image.repository.ImageRepository;
+import com.drawe.backend.domain.image.service.ImageUrlSigner;
 import com.drawe.backend.domain.project.dto.PinItem;
 import com.drawe.backend.domain.project.dto.PinListResponse;
 import com.drawe.backend.domain.project.repository.ProjectRepository;
@@ -28,6 +29,7 @@ public class PinService {
   private final ProjectRepository projectRepository;
   private final ImageRepository imageRepository;
   private final ImageDraweTagRepository imageDraweTagRepository;
+  private final ImageUrlSigner imageUrlSigner;
 
   @Transactional
   public void addPins(User user, Long projectId, Long imageId) {
@@ -102,7 +104,7 @@ public class PinService {
   private PinItem toPinItem(Image img, ImageDraweTag tag) {
     return new PinItem(
         img.getId(),
-        img.getUrl(),
+        imageUrlSigner.sign(img.getUrl()),
         img.getPhotographerName(),
         img.getPhotographerUsername(),
         img.getSource() != null ? img.getSource().name() : null,

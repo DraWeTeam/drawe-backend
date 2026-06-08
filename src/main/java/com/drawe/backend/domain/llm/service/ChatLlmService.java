@@ -12,6 +12,7 @@ import com.drawe.backend.domain.enums.LlmProvider;
 import com.drawe.backend.domain.enums.MessageRole;
 import com.drawe.backend.domain.enums.UserPlan;
 import com.drawe.backend.domain.image.service.ImageGenerationService;
+import com.drawe.backend.domain.image.service.ImageUrlSigner;
 import com.drawe.backend.domain.llm.dto.*;
 import com.drawe.backend.domain.llm.repository.ChatSessionRepository;
 import com.drawe.backend.domain.llm.repository.LlmMessageRepository;
@@ -56,6 +57,7 @@ public class ChatLlmService {
   private final ImageGenerationService imageGenerationService;
   private final UserPrefSummaryService userPrefSummaryService;
   private final AnalyticsEventService analyticsEventService;
+  private final ImageUrlSigner imageUrlSigner;
 
   @Transactional
   public ChatResponse chat(User user, Long projectId, ChatRequest request) {
@@ -173,7 +175,7 @@ public class ChatLlmService {
           session.getId(),
           "guide",
           result.content(),
-          convertToReferenceItems(references),
+          signReferenceUrls(refItems),
           decision.action().name(), // "NEW_SEARCH" | "KEEP" | "SKIP"
           offerGenerate,
           offerGenerate ? request.message() : null,
@@ -348,7 +350,7 @@ public class ChatLlmService {
     List<ChatHistoryResponse.HistoryItem> items =
         llmMessageRepository.findByChatSessionOrderByCreatedAtAsc(session).stream()
             .filter(m -> m.getRole() != MessageRole.SYSTEM)
-            .map(ChatHistoryResponse.HistoryItem::from)
+            .map(m -> ChatHistoryResponse.HistoryItem.from(m, imageUrlSigner))
             .toList();
     return new ChatHistoryResponse(session.getId(), items);
   }
@@ -408,7 +410,8 @@ public class ChatLlmService {
         decision.action().name(), // "GENERATE_NOW"
         false,
         null,
-        new ChatResponse.GeneratedImage(image.getId(), image.getUrl(), decision.keywords()));
+        new ChatResponse.GeneratedImage(
+            image.getId(), imageUrlSigner.sign(image.getUrl()), decision.keywords()));
   }
 
   /** 사용자가 "AI 이미지 만들어주세요" 버튼을 누른 경우 호출. Bria 로 이미지 생성 후 세션에 ASSISTANT 메시지로 기록. */
@@ -432,7 +435,7 @@ public class ChatLlmService {
     session.setLastActive(Instant.now());
 
     return new GenerateImageResponse(
-        session.getId(), image.getId(), image.getUrl(), request.prompt());
+        session.getId(), image.getId(), imageUrlSigner.sign(image.getUrl()), request.prompt());
   }
 
   @Transactional
@@ -682,6 +685,28 @@ public class ChatLlmService {
                     r.subject(),
                     r.mood(),
                     r.score().doubleValue(),
+                    r.source()))
+        .toList();
+  }
+
+  /**
+   * 응답으로 내보내기 직전 레퍼런스 이미지 URL 에 서명을 붙인다. DB 에는 상대경로({@code /images/{id}})로 저장하고 (만료가 박힌 URL 을
+   * 영구 저장하지 않기 위해) 노출 순간에만 서명한다. Unsplash 절대 URL 은 signer 가 그대로 통과시킨다.
+   */
+  private List<ChatResponse.ReferenceItem> signReferenceUrls(
+      List<ChatResponse.ReferenceItem> items) {
+    return items.stream()
+        .map(
+            r ->
+                new ChatResponse.ReferenceItem(
+                    r.id(),
+                    imageUrlSigner.sign(r.url()),
+                    r.photographerName(),
+                    r.photographerUsername(),
+                    r.technique(),
+                    r.subject(),
+                    r.mood(),
+                    r.similarity(),
                     r.source()))
         .toList();
   }

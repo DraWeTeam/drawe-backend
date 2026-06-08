@@ -74,6 +74,10 @@ public class SecurityConfig {
                     .requestMatchers(
                         HttpMethod.GET, "/auth/google", "/auth/check-email", "/auth/check-nickname")
                     .permitAll()
+                    // /images/{id} 는 서명(exp+sig)으로 접근 제어한다 (ImageUrlSigner). 브라우저 <img> 요청에는
+                    // Bearer 헤더가 안 실려 인증을 요구하면 AI 이미지가 깨지므로 토큰 인증에서 제외. 업로드(POST)는 인증 유지.
+                    .requestMatchers(HttpMethod.GET, "/images/*")
+                    .permitAll()
                     .requestMatchers(HttpMethod.POST, "/auth/logout", "/auth/check-password")
                     .authenticated()
                     .anyRequest()
