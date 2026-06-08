@@ -13,8 +13,13 @@ import com.drawe.backend.domain.enums.MessageRole;
 import com.drawe.backend.domain.enums.UserPlan;
 import com.drawe.backend.domain.image.service.ImageGenerationService;
 import com.drawe.backend.domain.image.service.ImageUrlSigner;
+import com.drawe.backend.domain.llm.classifier.IntentResultAdapter;
+import com.drawe.backend.domain.llm.contract.IntentResult;
+import com.drawe.backend.domain.llm.contract.ReferenceImage;
+import com.drawe.backend.domain.llm.contract.StepContext;
 import com.drawe.backend.domain.llm.dto.*;
 import com.drawe.backend.domain.llm.metrics.LlmMetrics;
+import com.drawe.backend.domain.llm.workflow.WorkflowService;
 import com.drawe.backend.domain.llm.repository.ChatSessionRepository;
 import com.drawe.backend.domain.llm.repository.LlmMessageRepository;
 import com.drawe.backend.domain.log.SearchLogService;
@@ -27,12 +32,14 @@ import com.drawe.backend.domain.search.service.SearchService;
 import com.drawe.backend.global.config.LlmProperties;
 import com.drawe.backend.global.error.CustomException;
 import com.drawe.backend.global.error.ErrorCode;
+import io.micrometer.core.instrument.MeterRegistry;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
@@ -55,7 +62,10 @@ public class ChatLlmService {
 
   private final RulePreRouter rulePreRouter;
   private final KeywordExtractor keywordExtractor;
+  private final IntentResultAdapter intentResultAdapter;
+  private final WorkflowService workflowService;
   private final LlmMetrics llmMetrics;
+  private final MeterRegistry meterRegistry;
   private final SearchService searchService;
   private final SearchLogService searchLogService;
   private final ImageGenerationService imageGenerationService;
@@ -81,7 +91,8 @@ public class ChatLlmService {
 
     // 검색 결정: 결정론적 룰 프리라우터 먼저 → 미스면 Grok 풀 분류로 폴백.
     // 명확한 기능 신호(인사·감사·명시적 생성)는 LLM 콜 없이 룰로 끝낸다 (S1' 트랙 A).
-    ExtractionResult decision = routeIntent(user, session.getId(), request.message(), history);
+    RoutedIntent routed = routeIntent(user, session.getId(), request.message(), history);
+    ExtractionResult decision = routed.decision();
 
     // 사용자가 명시적으로 이미지 생성을 요청한 경우 — 검색·LLM 답변 모두 건너뛰고
     // 바로 Bria 호출해서 응답에 생성된 이미지 url 을 담아 돌려준다.
@@ -90,7 +101,7 @@ public class ChatLlmService {
     }
 
     List<ImageResult> references =
-        handleSearchDecision(user, project, session.getId(), request.message(), decision);
+        handleSearchDecision(user, project, session.getId(), request.message(), routed);
 
     // 검색은 시도했지만 적합한 레퍼런스가 없을 때 AI 이미지 생성을 제안한다.
     boolean offerGenerate =
@@ -212,7 +223,13 @@ public class ChatLlmService {
    * <p>룰 히트/미스를 analytics(DB) + Micrometer(실시간) 로 집계해 ADR §4 DoD(룰 적중률 ≥ 30%, 분류 latency ≤
    * 300ms) 를 측정한다.
    */
-  private ExtractionResult routeIntent(
+  /**
+   * 분류 결과 + 어느 tier 가 결정했는지. {@code ruleDecided}=true 면 룰(RulePreRouter), false 면 Grok 폴백. shadow
+   * 워크플로우의 IntentResult tier 판정에 쓴다.
+   */
+  private record RoutedIntent(ExtractionResult decision, boolean ruleDecided) {}
+
+  private RoutedIntent routeIntent(
       User user, String sessionId, String message, List<LlmCallContext.Turn> history) {
     RulePreRouter.Decision ruleDecision = rulePreRouter.route(message, history);
 
@@ -223,7 +240,7 @@ public class ChatLlmService {
       payload.put("action", action);
       analyticsEventService.track(AnalyticsEventType.INTENT_RULE_HIT, user, sessionId, payload);
       llmMetrics.ruleHit(ruleDecision.ruleId(), action);
-      return ruleDecision.result();
+      return new RoutedIntent(ruleDecision.result(), true);
     }
 
     analyticsEventService.track(
@@ -239,7 +256,7 @@ public class ChatLlmService {
     try {
       ExtractionResult result = keywordExtractor.extract(message, history);
       success = true;
-      return result;
+      return new RoutedIntent(result, false);
     } finally {
       llmMetrics.classifyLatency(Duration.ofNanos(System.nanoTime() - start), success);
     }
@@ -256,8 +273,9 @@ public class ChatLlmService {
   }
 
   private List<ImageResult> handleSearchDecision(
-      User user, Project project, String sessionId, String message, ExtractionResult decision) {
+      User user, Project project, String sessionId, String message, RoutedIntent routed) {
 
+    ExtractionResult decision = routed.decision();
     int messageLength = message != null ? message.length() : 0;
 
     switch (decision.action()) {
@@ -343,6 +361,11 @@ public class ChatLlmService {
           searchPayload.put("blocked", false);
           analyticsEventService.track(
               AnalyticsEventType.SEARCH_EXECUTED, user, sessionId, searchPayload);
+
+          // shadow: WorkflowService(Komoran 경로)를 병렬로 한 번 돌려 기존(Grok 키워드) 검색결과와
+          // 비교만 한다. 실제 응답에는 영향 없음 (트랙 A ③ shadow 연결).
+          shadowWorkflow(user, project, sessionId, message, routed, result.results());
+
           return result.results();
 
         } catch (Exception e) {
@@ -385,6 +408,71 @@ public class ChatLlmService {
 
       default:
         return List.of();
+    }
+  }
+
+  /**
+   * shadow 워크플로우 (트랙 A ③). 기존 chat() 검색 결과는 그대로 두고, WorkflowService(Komoran 경로)를 병렬로 한 번
+   * 돌려 같은 입력에 어떤 검색 결과를 냈을지 비교·로깅·메트릭만 한다. **실제 응답에는 영향이 없으며 예외도 절대 밖으로 던지지 않는다.**
+   *
+   * <p>핵심 비교: 기존은 Grok 이 뽑은 영문 키워드로 검색, shadow 는 Komoran 형태소→사전 키워드로 검색. ref id 집합이
+   * 얼마나 겹치는지(match/partial/miss)로 트랙 B 사전 품질을 검증한다. 설계: {@code
+   * docs/decisions/S1A-workflow-shadow-design.md}.
+   */
+  private void shadowWorkflow(
+      User user,
+      Project project,
+      String sessionId,
+      String message,
+      RoutedIntent routed,
+      List<ImageResult> baselineResults) {
+    try {
+      IntentResult intent =
+          intentResultAdapter.adapt(routed.decision(), routed.ruleDecided(), List.of(), false);
+
+      // shadow 1차: rawMessage 를 그대로 cleanedMessage 로 (앵커 전처리는 ① 2차 몫).
+      StepContext initial =
+          StepContext.start(
+              user.getId(),
+              project.getId(),
+              sessionId,
+              message,
+              message,
+              intent,
+              null,
+              List.of());
+
+      StepContext finalCtx = workflowService.run(intent, initial);
+
+      // 기존(baseline) vs shadow 검색결과 ref id 비교.
+      Set<Long> baseIds =
+          baselineResults.stream().map(ImageResult::id).collect(Collectors.toSet());
+      Set<Long> shadowIds =
+          finalCtx.references().stream().map(ReferenceImage::imageId).collect(Collectors.toSet());
+
+      String outcome;
+      if (shadowIds.isEmpty()) {
+        outcome = "miss";
+      } else if (shadowIds.equals(baseIds)) {
+        outcome = "match";
+      } else if (shadowIds.stream().anyMatch(baseIds::contains)) {
+        outcome = "partial";
+      } else {
+        outcome = "miss";
+      }
+
+      log.info(
+          "🔬 shadow workflow: code={} outcome={} base_n={} shadow_n={} overlap={}",
+          intent.code().code(),
+          outcome,
+          baseIds.size(),
+          shadowIds.size(),
+          shadowIds.stream().filter(baseIds::contains).count());
+      meterRegistry.counter("drawe.workflow.shadow", "outcome", outcome).increment();
+    } catch (Exception e) {
+      // shadow 는 절대 실제 응답을 깨면 안 된다 — 어떤 예외도 삼키고 메트릭만.
+      log.warn("shadow workflow 실패(무시): error_class={}", e.getClass().getSimpleName());
+      meterRegistry.counter("drawe.workflow.shadow", "outcome", "error").increment();
     }
   }
 
