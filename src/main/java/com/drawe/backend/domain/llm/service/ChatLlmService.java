@@ -51,6 +51,7 @@ public class ChatLlmService {
   private final ImageInputResolver imageInputResolver;
   private final List<LlmService> llmServices;
 
+  private final RulePreRouter rulePreRouter;
   private final KeywordExtractor keywordExtractor;
   private final SearchService searchService;
   private final SearchLogService searchLogService;
@@ -75,8 +76,9 @@ public class ChatLlmService {
     List<LlmMessage> all = llmMessageRepository.findByChatSessionOrderByCreatedAtAsc(session);
     List<LlmCallContext.Turn> history = trimHistory(all, llmProperties.getMaxHistory());
 
-    // 검색 결정
-    ExtractionResult decision = keywordExtractor.extract(request.message(), history);
+    // 검색 결정: 결정론적 룰 프리라우터 먼저 → 미스면 Grok 풀 분류로 폴백.
+    // 명확한 기능 신호(인사·감사·명시적 생성)는 LLM 콜 없이 룰로 끝낸다 (S1' 트랙 A).
+    ExtractionResult decision = routeIntent(user, session.getId(), request.message(), history);
 
     // 사용자가 명시적으로 이미지 생성을 요청한 경우 — 검색·LLM 답변 모두 건너뛰고
     // 바로 Bria 호출해서 응답에 생성된 이미지 url 을 담아 돌려준다.
@@ -194,6 +196,31 @@ public class ChatLlmService {
       trackError(user, session.getId(), provider, e);
       throw new CustomException(ErrorCode.AI_SERVICE_ERROR);
     }
+  }
+
+  /**
+   * 의도 분류: 결정론적 룰 프리라우터를 먼저 시도하고, 미스면 Grok 풀 분류로 폴백한다.
+   *
+   * <p>룰 히트/미스를 analytics 로 집계해 ADR §4 DoD(룰 적중률 ≥ 30%) 를 측정한다.
+   */
+  private ExtractionResult routeIntent(
+      User user, String sessionId, String message, List<LlmCallContext.Turn> history) {
+    RulePreRouter.Decision ruleDecision = rulePreRouter.route(message, history);
+
+    if (ruleDecision.isHit()) {
+      Map<String, Object> payload = new HashMap<>();
+      payload.put("rule_id", ruleDecision.ruleId());
+      payload.put("action", ruleDecision.result().action().name());
+      analyticsEventService.track(AnalyticsEventType.INTENT_RULE_HIT, user, sessionId, payload);
+      return ruleDecision.result();
+    }
+
+    analyticsEventService.track(
+        AnalyticsEventType.INTENT_RULE_MISS,
+        user,
+        sessionId,
+        Map.of("message_length", message != null ? message.length() : 0));
+    return keywordExtractor.extract(message, history);
   }
 
   private void trackError(User user, String sessionId, LlmProvider provider, Exception e) {

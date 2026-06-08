@@ -39,4 +39,15 @@ public final class AnalyticsEventType {
   // ── 가이드 ────────────────────────────────────────
   /** LLM 가이드 응답 완성 (chat_success와 같이 발송, 가이드 품질 분석용). */
   public static final String GUIDE_COMPLETED = "guide_completed";
+
+  // ── 의도 분류 (S1' 트랙 A 룰 프리라우터) ───────────
+  /**
+   * 룰 프리라우터가 LLM 콜 없이 의도를 결정. payload: rule_id, action.
+   *
+   * <p>룰 적중률(ADR §4 DoD ≥ 30%) = RULE_HIT / (RULE_HIT + RULE_MISS).
+   */
+  public static final String INTENT_RULE_HIT = "intent_rule_hit";
+
+  /** 룰 미스 → Grok 풀 분류로 폴백. payload: message_length. */
+  public static final String INTENT_RULE_MISS = "intent_rule_miss";
 }
