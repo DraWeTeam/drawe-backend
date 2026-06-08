@@ -14,6 +14,7 @@ import com.drawe.backend.domain.enums.UserPlan;
 import com.drawe.backend.domain.image.service.ImageGenerationService;
 import com.drawe.backend.domain.image.service.ImageUrlSigner;
 import com.drawe.backend.domain.llm.dto.*;
+import com.drawe.backend.domain.llm.metrics.LlmMetrics;
 import com.drawe.backend.domain.llm.repository.ChatSessionRepository;
 import com.drawe.backend.domain.llm.repository.LlmMessageRepository;
 import com.drawe.backend.domain.log.SearchLogService;
@@ -26,6 +27,7 @@ import com.drawe.backend.domain.search.service.SearchService;
 import com.drawe.backend.global.config.LlmProperties;
 import com.drawe.backend.global.error.CustomException;
 import com.drawe.backend.global.error.ErrorCode;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -53,6 +55,7 @@ public class ChatLlmService {
 
   private final RulePreRouter rulePreRouter;
   private final KeywordExtractor keywordExtractor;
+  private final LlmMetrics llmMetrics;
   private final SearchService searchService;
   private final SearchLogService searchLogService;
   private final ImageGenerationService imageGenerationService;
@@ -138,6 +141,7 @@ public class ChatLlmService {
     assistantMsg.setProvider(provider);
     assistantMsg.setHasImage(false);
 
+    long llmStart = System.nanoTime();
     try {
       LlmCallResult result = llm.generate(ctx);
       assistantMsg.setContent(result.content());
@@ -172,6 +176,8 @@ public class ChatLlmService {
       successPayload.put("offer_generate", offerGenerate);
       analyticsEventService.track(
           AnalyticsEventType.CHAT_SUCCESS, user, session.getId(), successPayload);
+      // LLM 내부 측정 latency 를 그대로 Timer 에 (외부 nanoTime 보다 정확).
+      llmMetrics.llmCall(provider.name(), Duration.ofMillis(result.latencyMs()), true);
 
       return new ChatResponse(
           session.getId(),
@@ -183,10 +189,12 @@ public class ChatLlmService {
           offerGenerate ? request.message() : null,
           null);
     } catch (CustomException e) {
+      llmMetrics.llmCall(provider.name(), Duration.ofNanos(System.nanoTime() - llmStart), false);
       persistFailure(assistantMsg, e);
       trackError(user, session.getId(), provider, e);
       throw e;
     } catch (Exception e) {
+      llmMetrics.llmCall(provider.name(), Duration.ofNanos(System.nanoTime() - llmStart), false);
       log.error(
           "LLM 호출 실패 session={} provider={} error_class={}",
           session.getId(),
@@ -201,17 +209,20 @@ public class ChatLlmService {
   /**
    * 의도 분류: 결정론적 룰 프리라우터를 먼저 시도하고, 미스면 Grok 풀 분류로 폴백한다.
    *
-   * <p>룰 히트/미스를 analytics 로 집계해 ADR §4 DoD(룰 적중률 ≥ 30%) 를 측정한다.
+   * <p>룰 히트/미스를 analytics(DB) + Micrometer(실시간) 로 집계해 ADR §4 DoD(룰 적중률 ≥ 30%, 분류 latency ≤
+   * 300ms) 를 측정한다.
    */
   private ExtractionResult routeIntent(
       User user, String sessionId, String message, List<LlmCallContext.Turn> history) {
     RulePreRouter.Decision ruleDecision = rulePreRouter.route(message, history);
 
     if (ruleDecision.isHit()) {
+      String action = ruleDecision.result().action().name();
       Map<String, Object> payload = new HashMap<>();
       payload.put("rule_id", ruleDecision.ruleId());
-      payload.put("action", ruleDecision.result().action().name());
+      payload.put("action", action);
       analyticsEventService.track(AnalyticsEventType.INTENT_RULE_HIT, user, sessionId, payload);
+      llmMetrics.ruleHit(ruleDecision.ruleId(), action);
       return ruleDecision.result();
     }
 
@@ -220,7 +231,18 @@ public class ChatLlmService {
         user,
         sessionId,
         Map.of("message_length", message != null ? message.length() : 0));
-    return keywordExtractor.extract(message, history);
+    llmMetrics.ruleMiss();
+
+    // 룰 미스 → 경량 분류기(Grok) 호출. latency 를 Timer 로 측정 (DoD ≤300ms).
+    long start = System.nanoTime();
+    boolean success = false;
+    try {
+      ExtractionResult result = keywordExtractor.extract(message, history);
+      success = true;
+      return result;
+    } finally {
+      llmMetrics.classifyLatency(Duration.ofNanos(System.nanoTime() - start), success);
+    }
   }
 
   private void trackError(User user, String sessionId, LlmProvider provider, Exception e) {
