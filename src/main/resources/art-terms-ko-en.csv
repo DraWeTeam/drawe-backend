@@ -1,0 +1,116 @@
+ko,en,category
+# === [1] 기법 (technique) — 그림 방식·도구 ===
+수채화,watercolor,technique
+유화,oil painting,technique
+아크릴,acrylic painting,technique
+파스텔,pastel,technique
+오일파스텔,oil pastel,technique
+색연필,colored pencil,technique
+연필,pencil drawing,technique
+펜,pen drawing,technique
+잉크,ink drawing,technique
+드로잉,drawing,technique
+스케치,sketch,technique
+선화,line art,technique
+크로키,croquis,technique
+디지털,digital art,technique
+일러스트,illustration,technique
+페인팅,painting,technique
+
+# === [2] 주제 — 인물·동물 (subject) ===
+인물,figure,subject
+인체,human anatomy,subject
+얼굴,face portrait,subject
+캐릭터,character,subject
+사람,person,subject
+남자,man,subject
+여자,woman,subject
+아이,child,subject
+고양이,cat,subject
+강아지,puppy,subject
+개,dog,subject
+새,bird,subject
+물고기,fish,subject
+말,horse,subject
+
+# === [3] 주제 — 자연·풍경 (subject) ===
+풍경,landscape,subject
+도시,cityscape,subject
+바다,sea,subject
+산,mountain,subject
+하늘,sky,subject
+구름,cloud,subject
+꽃,flower,subject
+나무,tree,subject
+벚꽃,cherry blossom,subject
+숲,forest,subject
+강,river,subject
+폭포,waterfall,subject
+호수,lake,subject
+
+# === [4] 개념·구성 (concept) ===
+구도,composition,concept
+명암,light and shadow,concept
+비율,proportion,concept
+원근법,perspective,concept
+투시,perspective,concept
+입체감,three dimensional form,concept
+양감,volume,concept
+음영,shadow,concept
+질감,texture,concept
+디테일,detail,concept
+
+# === [5] 조명 (lighting) ===
+역광,backlight,lighting
+빛,lighting,lighting
+그림자,shadow,lighting
+
+# === [6] 분위기·무드 (mood) ===
+분위기,mood,mood
+무드,mood,mood
+컨셉,concept art,mood
+컨셉아트,concept art,mood
+
+# === [7] 색 (color) ===
+색감,color tone,color
+색조,color tone,color
+색온도,color temperature,color
+빨갛,red,color
+파랗,blue,color
+노랗,yellow,color
+초록,green,color
+검,black,color
+하얗,white,color
+
+# === [8] 계절·시간 (time) ===
+봄,spring,time
+여름,summer,time
+가을,autumn,time
+겨울,winter,time
+아침,morning,time
+저녁,evening,time
+밤,night,time
+황혼,twilight,time
+
+# === [9] 동작·액션 (action) — 동사 어간 ===
+그리,drawing,action
+달리,running,action
+뛰,jumping,action
+걷,walking,action
+잡,holding,action
+들,carrying,action
+안,hugging,action
+
+# === [10] 포즈 (pose) — 동사 어간 ===
+앉,sitting,pose
+서,standing,pose
+눕,lying down,pose
+자,sleeping,pose
+
+# === [11] 표정 (expression) — 동사 어간 ===
+웃,smiling,expression
+울,crying,expression
+
+# === [12] 그림 일반 (general) ===
+그림,drawing,general
+포즈,pose,general
