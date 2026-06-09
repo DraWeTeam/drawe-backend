@@ -450,16 +450,7 @@ public class ChatLlmService {
       Set<Long> shadowIds =
           finalCtx.references().stream().map(ReferenceImage::imageId).collect(Collectors.toSet());
 
-      String outcome;
-      if (shadowIds.isEmpty()) {
-        outcome = "miss";
-      } else if (shadowIds.equals(baseIds)) {
-        outcome = "match";
-      } else if (shadowIds.stream().anyMatch(baseIds::contains)) {
-        outcome = "partial";
-      } else {
-        outcome = "miss";
-      }
+      String outcome = classifyShadowOutcome(baseIds, shadowIds);
 
       log.info(
           "🔬 shadow workflow: code={} outcome={} base_n={} shadow_n={} overlap={}",
@@ -474,6 +465,31 @@ public class ChatLlmService {
       log.warn("shadow workflow 실패(무시): error_class={}", e.getClass().getSimpleName());
       meterRegistry.counter("drawe.workflow.shadow", "outcome", "error").increment();
     }
+  }
+
+  /**
+   * baseline(Grok 키워드) vs shadow(Komoran 키워드) 검색결과 ref id 집합을 비교해 outcome 을 판정한다.
+   *
+   * <ul>
+   *   <li>{@code match} — 두 집합이 정확히 같음 (shadow 가 baseline 을 완전 재현)</li>
+   *   <li>{@code partial} — 교집합은 있으나 완전히 같지는 않음</li>
+   *   <li>{@code miss} — shadow 가 비었거나 교집합이 전혀 없음</li>
+   * </ul>
+   *
+   * <p>shadow 가 비었으면(키워드 추출/검색이 결과 0) baseline 과 무관하게 {@code miss}. {@code error}(예외)는
+   * 호출 측 catch 가 별도로 찍으므로 여기서는 다루지 않는다. 순수 함수 — 테스트 용이성을 위해 분리.
+   */
+  static String classifyShadowOutcome(Set<Long> baseIds, Set<Long> shadowIds) {
+    if (shadowIds.isEmpty()) {
+      return "miss";
+    }
+    if (shadowIds.equals(baseIds)) {
+      return "match";
+    }
+    if (shadowIds.stream().anyMatch(baseIds::contains)) {
+      return "partial";
+    }
+    return "miss";
   }
 
   private double round3(double v) {

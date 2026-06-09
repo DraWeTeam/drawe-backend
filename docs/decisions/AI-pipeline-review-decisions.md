@@ -289,7 +289,7 @@ public enum IntentCode {
 |------|------|------|
 | **형태소 분석** | **Komoran** | Java 네이티브, 도메인 사전 추가 용이. Nori는 ES 미사용 시 과함 |
 | **메트릭** | **Micrometer + analytics_events 확장** | Opus: "MetricsCollector는 사실상 Micrometer 재발명". Timer/Counter에 intent code·tier 태깅 |
-| **외부 API 안정성** | **Resilience4j** | LLM/CLIP/Bria 동기 체인에 타임아웃·서킷브레이커·bulkhead. 현재 없음 = 러너업 후회 후보 |
+| **외부 API 안정성** | **Resilience4j** | 외부 동기 체인에 타임아웃 전면 적용. **멱등 호출(CLIP/벡터)은 타임아웃+서킷+재시도, 생성계(LLM/Bria)는 타임아웃만**(재시도=중복 생성 비용, 서킷=생성 실패까지 여는 과민). bulkhead 는 Phase 4 재검토. 상세: [`S1-resilience4j-design.md`](./S1-resilience4j-design.md) §4 |
 | **검증** | **Jakarta Bean Validation + record** | ResponseValidator 구조 파트 손코딩 회피 |
 | **전략 디스패치** | **Spring `Map<EnumKey, Bean>` 자동 주입** | StepExecutor 빈 자동 수집 |
 | **비동기/동시성** | **CompletableFuture + bounded executor** (Java 17) / 21 업그레이드 시 가상 스레드 | Phase 4 multi-call에서 외부 API 차단 회피 |
@@ -335,7 +335,7 @@ public enum IntentCode {
 |------|------|------|
 | **A** (결정·오케스트레이션) | Phase 1: 룰 매처(명확 신호만) + 경량 LLM 분류기 + 정적 전략 맵 도입 | A |
 | **B** (검색·데이터) | Phase 2: Komoran + art-terms-ko-en.csv (베타 미매핑 단어 시드) + KeywordExtractor 재구현 | B |
-| **공통** | Resilience4j 도입 (모든 외부 API 호출에 타임아웃·서킷브레이커) | A |
+| **공통** | Resilience4j 도입 (모든 외부 API 호출에 타임아웃; 멱등 호출은 서킷브레이커·재시도 추가, 생성계는 타임아웃만 — `S1-resilience4j-design.md` §4) | A |
 | **공통** | Micrometer 도입 + intent code·tier 태깅 | B |
 
 **병렬 조건**: `IntentResult` / `StepContext` record를 S0에 합의.
@@ -344,7 +344,7 @@ public enum IntentCode {
 - 룰 명확 신호 적중률 ≥ 30% (메트릭으로 확인)
 - 경량 LLM 분류 latency ≤ 300ms
 - 사전 적중률 ≥ 60% (베타 로그 기준)
-- 외부 API 호출 100%가 Resilience4j 통과
+- 외부 API 호출 100%에 타임아웃 적용 (hang·스레드풀 고갈 차단). 멱등 호출(CLIP/벡터)은 추가로 서킷·재시도 통과 — 생성계(LLM/Bria)는 §8 근거로 서킷·재시도 제외
 
 ### S2' (+2~+4주) — 출력 규격화 + 검증
 | 트랙 | 작업 | 담당 |

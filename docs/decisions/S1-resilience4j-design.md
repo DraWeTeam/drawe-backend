@@ -49,14 +49,16 @@ implementation 'org.springframework.boot:spring-boot-starter-aop'   // 어노테
 
 > ⚠️ 아래 숫자는 **합리적 기본값**이며 강사님 컨펌·실측 후 조정 대상. application.yml 한 곳에 모아 숫자만 바꾸게 한다.
 
-| 인스턴스 | 대상 | 타임아웃 | 재시도 | 서킷(실패율/윈도우) | 근거 |
-|---------|------|---------|--------|--------------------|------|
-| `llm` | Grok/Claude/Gemini | 30s | 0 (LLM 재호출 비쌈·비결정) | 50% / 10 | 응답 본래 느림. 재시도 X (사용자 대기·비용) |
-| `embed` | FastAPI 임베딩 | 5s | 1 | 50% / 10 | 빨라야 정상. 일시 실패 1회 재시도 |
-| `vector` | Pinecone 검색/upsert | 5s | 1 | 50% / 10 | 동상 |
-| `imagegen` | Bria 생성 | 60s | 0 | 50% / 5 | 매우 느림+폴링. 재시도 X(중복 생성·과금) |
+> Resilience4j **인스턴스(서킷·재시도)는 멱등 호출인 `embed`/`vector` 만 정의**한다. 생성계(LLM/Bria)는 서킷·재시도를 붙이지 않고 클라이언트 타임아웃만 적용한다(§4.1). 아래 표의 `llm`/`imagegen` 행은 **타임아웃 값 참고용**이며 Resilience4j 인스턴스가 아니다.
 
-공통 서킷 기본: `waitDurationInOpenState: 30s`, `minimumNumberOfCalls: 5`, `permittedNumberOfCallsInHalfOpenState: 3`, `automaticTransitionFromOpenToHalfOpenEnabled: true`.
+| 대상 | 적용 방식 | 타임아웃 | 재시도 | 서킷(실패율/윈도우) | 근거 |
+|------|----------|---------|--------|--------------------|------|
+| `embed` (FastAPI 임베딩) | R4j 인스턴스 | 5s | 1 | 50% / 10 | 빨라야 정상. 일시 실패 1회 재시도 |
+| `vector` (Pinecone 검색/upsert) | R4j 인스턴스 | 5s | 1 | 50% / 10 | 동상 |
+| LLM (Grok/Claude/Gemini) | 타임아웃만 | connect 3s / read 30s (`HttpClientFactory`) | — | — (서킷 제외) | 응답 본래 느림. 재시도·서킷 X (§4.1) |
+| Bria 생성 | 타임아웃만 | connect 3s/read 10s + 폴링 30s 상한 | — | — (서킷 제외) | 자체 폴링·에러 처리 견고. 재시도 X(중복 생성·과금) (§4.1) |
+
+embed/vector 공통 서킷 기본: `waitDurationInOpenState: 30s`, `minimumNumberOfCalls: 5`, `permittedNumberOfCallsInHalfOpenState: 3`, `automaticTransitionFromOpenToHalfOpenEnabled: true`.
 
 재시도 대상 예외: `TimeoutException`, `IOException`, 5xx. **4xx·BusinessException(CustomException)은 재시도 안 함**(클라이언트 잘못이라 재시도 무의미).
 
