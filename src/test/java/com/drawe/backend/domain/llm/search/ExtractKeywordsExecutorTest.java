@@ -21,9 +21,12 @@ import static org.mockito.Mockito.when;
  */
 class ExtractKeywordsExecutorTest {
 
-    /** StepContext 빌더 헬퍼 — 12개 필드를 매번 채우는 보일러플레이트 압축. */
+    /**
+     * StepContext 빌더 헬퍼 — cleanedMessage 외엔 의미 없으므로 start() 팩토리로 압축.
+     * start() 를 쓰면 record 에 필드가 더 늘어도 이 테스트는 안 깨진다.
+     */
     private StepContext newCtx(String cleanedMessage) {
-        return new StepContext(
+        return StepContext.start(
                 1L,                  // userId
                 1L,                  // projectId
                 "session-1",         // sessionId
@@ -31,11 +34,7 @@ class ExtractKeywordsExecutorTest {
                 cleanedMessage,      // cleanedMessage
                 null,                // intent
                 null,                // uploadedImageUrl
-                null,                // previousReferences
-                null,                // keywords
-                null,                // references
-                null,                // generatedImage
-                null                 // composedAnswer
+                null                 // previousReferences
         );
     }
 

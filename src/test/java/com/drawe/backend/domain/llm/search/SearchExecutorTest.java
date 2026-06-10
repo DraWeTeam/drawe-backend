@@ -28,20 +28,19 @@ import static org.mockito.Mockito.when;
  */
 class SearchExecutorTest {
 
-    /** StepContext 헬퍼 — keywords 채워서 만들기. */
+    /**
+     * StepContext 헬퍼 — keywords 채워서 만들기. start() 팩토리 + withKeywords 로 압축해
+     * record 필드가 더 늘어도 안 깨지게 한다. (withKeywords 는 null 도 그대로 보존 — keywords null 케이스 검증용.)
+     */
     private StepContext newCtxWithKeywords(List<String> keywords) {
-        return new StepContext(
-                1L, 1L, "session-1",
-                null,                       // rawMessage
-                "테스트 메시지",            // cleanedMessage
-                null,                       // intent
-                null,                       // uploadedImageUrl
-                null,                       // previousReferences
-                keywords,                   // keywords ⭐
-                null,                       // references
-                null,                       // generatedImage
-                null                        // composedAnswer
-        );
+        return StepContext.start(
+                        1L, 1L, "session-1",
+                        null,            // rawMessage
+                        "테스트 메시지", // cleanedMessage
+                        null,            // intent
+                        null,            // uploadedImageUrl
+                        null)            // previousReferences
+                .withKeywords(keywords);
     }
 
     /** ImageResult 13개 필드를 매번 채우는 보일러플레이트 압축. */

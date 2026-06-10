@@ -1,6 +1,8 @@
 package com.drawe.backend.domain.llm.contract;
 
+import com.drawe.backend.domain.enums.LlmProvider;
 import com.drawe.backend.domain.llm.dto.GenerateImageResponse;
+import com.drawe.backend.domain.llm.dto.LlmCallContext;
 import java.util.List;
 import lombok.With;
 
@@ -15,8 +17,17 @@ import lombok.With;
  *   <li><b>입력</b> (A 의 pre-route/분류가 채움, B 는 읽기만):
  *       userId, projectId, sessionId, rawMessage, cleanedMessage, intent, uploadedImageUrl, previousReferences</li>
  *   <li><b>누적</b> (B 가 채움): keywords, references</li>
+ *   <li><b>입력</b> (A 의 분류 단계가 채움, COMPOSE 가 읽음 — S2'): history, uploadedImageBytes, uploadedImageMimeType, provider</li>
  *   <li><b>누적</b> (A 가 채움): generatedImage, composedAnswer</li>
  * </ul>
+ *
+ * <h3>S2' 추가 필드 (트랙 A — COMPOSE 멀티콜)</h3>
+ * {@code ComposeExecutor} 가 LLM 합성을 떠안으려면 분류 단계만 알던 정보가 필요하다 —
+ * persona/userPrefs/projectContext SYSTEM turn 이 포함된 누적 {@code history}, 멀티모달
+ * {@code uploadedImageBytes}/{@code uploadedImageMimeType}, 그리고 어느 LLM 으로 부를지 {@code provider}.
+ * 전부 record 맨 끝에 추가했고 nullable 이다 — 기존 8-인자 {@link #start} 팩토리는 그대로 보존되어
+ * 이 필드들을 {@code null} 로 채우므로 트랙 B 의 생성 지점은 영향받지 않는다(설계:
+ * {@code docs/decisions/S2A-output-contract-design.md} §3.1).
  *
  * <h3>cleanedMessage 정규화 규칙 (A 합의안)</h3>
  * <ol>
@@ -49,16 +60,28 @@ public record StepContext(
 
     // ── 누적: A ──
     GenerateImageResponse generatedImage,
-    String composedAnswer
+    String composedAnswer,
+
+    // ── 입력: A 분류 단계가 채움, COMPOSE 가 읽음 (S2') ──
+    List<LlmCallContext.Turn> history,
+    byte[] uploadedImageBytes,
+    String uploadedImageMimeType,
+    LlmProvider provider
 ) {
 
   public StepContext {
     previousReferences = previousReferences == null ? List.of() : List.copyOf(previousReferences);
     keywords = keywords == null ? List.of() : List.copyOf(keywords);
     references = references == null ? List.of() : List.copyOf(references);
+    history = history == null ? List.of() : List.copyOf(history);
   }
 
-  /** 파이프라인 시작 컨텍스트. 누적 필드는 빈 값으로 초기화. */
+  /**
+   * 파이프라인 시작 컨텍스트 (기본 — COMPOSE 정보 없음). 누적 필드는 빈 값, S2' COMPOSE 입력 필드는 {@code null}.
+   *
+   * <p>이 8-인자 시그니처는 트랙 B 의 생성 지점(shadow·테스트)이 의존하므로 보존한다. COMPOSE 를 실연결하는
+   * 메인 경로는 아래 {@link #startForCompose} 를 쓴다.
+   */
   public static StepContext start(
       Long userId,
       Long projectId,
@@ -80,6 +103,46 @@ public record StepContext(
         List.of(),
         List.of(),
         null,
+        null,
+        List.of(),
+        null,
+        null,
         null);
+  }
+
+  /**
+   * COMPOSE 멀티콜용 시작 컨텍스트 (S2'). 분류 단계가 history·이미지·provider 까지 실어 보낸다.
+   * {@code ComposeExecutor} 가 이 정보로 LLM 합성을 수행한다.
+   */
+  public static StepContext startForCompose(
+      Long userId,
+      Long projectId,
+      String sessionId,
+      String rawMessage,
+      String cleanedMessage,
+      IntentResult intent,
+      String uploadedImageUrl,
+      List<ReferenceImage> previousReferences,
+      List<LlmCallContext.Turn> history,
+      byte[] uploadedImageBytes,
+      String uploadedImageMimeType,
+      LlmProvider provider) {
+    return new StepContext(
+        userId,
+        projectId,
+        sessionId,
+        rawMessage,
+        cleanedMessage,
+        intent,
+        uploadedImageUrl,
+        previousReferences,
+        List.of(),
+        List.of(),
+        null,
+        null,
+        history,
+        uploadedImageBytes,
+        uploadedImageMimeType,
+        provider);
   }
 }
