@@ -18,6 +18,7 @@ import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
 @Slf4j
@@ -36,7 +37,13 @@ public class SearchService {
    *
    * <p>처리 흐름: 1. FastAPI로 쿼리를 768차원 벡터로 변환 2. Pinecone에서 top-K 유사 이미지 ID와 점수 조회 3. MySQL에서 해당 이미지들의
    * 메타데이터를 한 번에 조회 4. Pinecone 순위를 유지하며 응답 조립
+   *
+   * <p><b>트랜잭션 분리(REQUIRES_NEW):</b> 외부 호출(embed/Pinecone) 장애 시 예외가 이 프록시 경계를 빠져나가며 트랜잭션을
+   * rollback-only 로 마킹한다. 만약 호출자({@code ChatLlmService.chat()})의 트랜잭션에 참여(REQUIRED)하면, 호출자가
+   * 예외를 graceful 하게 catch 해도 호출자 트랜잭션이 이미 더럽혀져 커밋 시점에 {@code UnexpectedRollbackException}(500)이
+   * 난다. REQUIRES_NEW 로 별도 트랜잭션을 띄워 검색 실패가 호출자 트랜잭션을 오염시키지 않게 한다. 읽기 쿼리 2개는 한 스냅샷으로 유지.
    */
+  @Transactional(propagation = Propagation.REQUIRES_NEW, readOnly = true)
   public SearchResponse search(SearchRequest request) {
     String query = request.query();
     int topK = request.getTopK();
