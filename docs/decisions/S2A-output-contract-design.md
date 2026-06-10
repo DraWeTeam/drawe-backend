@@ -156,13 +156,14 @@ public StepContext execute(StepContext ctx) {
     "citations":     { "type": "array", "items": { "type": "integer" } },  // 인용한 references 1-based 인덱스
     "offer_generate":{ "type": "boolean" }              // 자료 부족 → 생성 제안 (LLM 의견; 시스템이 최종 결정)
   },
-  "required": ["message", "citations"],
+  "required": ["message", "citations", "offer_generate"],
   "additionalProperties": false
 }
 ```
 
 - `citations` 는 **본문에 실제로 인용한** 인덱스만. 무결성 검사(§5)의 입력.
 - `offer_generate` 는 참고용 — 최종 버튼 노출은 시스템(references.isEmpty() + mentionsGenerateOffer)이 결정. LLM 값은 보조 신호.
+- **strict 규칙(xAI/OpenAI 호환):** `strict:true` 면 properties 의 *모든* 키가 `required` 에 있어야 하고 `additionalProperties:false` 여야 한다 — 아니면 스키마 거부(400). 그래서 `offer_generate` 도 required 에 포함(보조 신호지만 boolean 이라 LLM 이 항상 채워도 부담 적음). 출처: [xAI Structured Outputs](https://docs.x.ai/developers/model-capabilities/text/structured-outputs).
 
 ### 4.2 GrokService.buildBody 확장
 
