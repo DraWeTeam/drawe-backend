@@ -153,6 +153,16 @@ class KomoranKeywordExtractorTest {
     }
 
     @Test
+    @DisplayName("extract — 검색 메타동사 '찾' 제거: 고양이 찾아줘 → [cat], 폴백 X")
+    void extractRemovesSearchMetaVerb() {
+        List<String> keywords = extractor.extract("고양이 찾아줘");
+
+        // '찾'(찾다)이 스톱워드로 빠져 미스율 0 → 폴백 안 탐, 사전 hit만 반환
+        assertThat(keywords).containsExactly("cat");
+        assertThat(fallback.calls).isEmpty();
+    }
+
+    @Test
     @DisplayName("extract — PoC: 수채화로 그린 고양이 더 보여줘")
     void extractPoCSample01() {
         List<String> keywords = extractor.extract("수채화로 그린 고양이 더 보여줘");
