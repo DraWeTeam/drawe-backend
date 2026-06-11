@@ -3,6 +3,7 @@ package com.drawe.backend.domain.llm.contract;
 import com.drawe.backend.domain.enums.LlmProvider;
 import com.drawe.backend.domain.llm.dto.GenerateImageResponse;
 import com.drawe.backend.domain.llm.dto.LlmCallContext;
+import com.drawe.backend.domain.llm.output.ComposedOutput;
 import java.util.List;
 import lombok.With;
 
@@ -18,8 +19,14 @@ import lombok.With;
  *       userId, projectId, sessionId, rawMessage, cleanedMessage, intent, uploadedImageUrl, previousReferences</li>
  *   <li><b>누적</b> (B 가 채움): keywords, references</li>
  *   <li><b>입력</b> (A 의 분류 단계가 채움, COMPOSE 가 읽음 — S2'): history, uploadedImageBytes, uploadedImageMimeType, provider</li>
- *   <li><b>누적</b> (A 가 채움): generatedImage, composedAnswer</li>
+ *   <li><b>누적</b> (A 가 채움): generatedImage, composedAnswer, composedOutput</li>
  * </ul>
+ *
+ * <h3>composedOutput vs composedAnswer (S2' 트랙 A ④)</h3>
+ * {@code composedOutput} 이 COMPOSE 합성의 진실의 원천 — 정정된 본문·citations·offerGenerate 를 모두 담는다.
+ * {@code composedAnswer} 는 {@code composedOutput.message()} 에서 파생한 본문 한 칸으로, 저장/응답이 String 만
+ * 필요할 때를 위한 편의 필드다. {@code ComposeExecutor} 가 둘을 함께 채운다 — 다운스트림(⑤ ChatResponse 조립)이
+ * citations·offerGenerate 까지 꺼내 쓰려면 {@code composedOutput} 을, 본문만 쓰려면 {@code composedAnswer} 를 읽는다.
  *
  * <h3>S2' 추가 필드 (트랙 A — COMPOSE 멀티콜)</h3>
  * {@code ComposeExecutor} 가 LLM 합성을 떠안으려면 분류 단계만 알던 정보가 필요하다 —
@@ -61,6 +68,7 @@ public record StepContext(
     // ── 누적: A ──
     GenerateImageResponse generatedImage,
     String composedAnswer,
+    ComposedOutput composedOutput,
 
     // ── 입력: A 분류 단계가 채움, COMPOSE 가 읽음 (S2') ──
     List<LlmCallContext.Turn> history,
@@ -104,6 +112,7 @@ public record StepContext(
         List.of(),
         null,
         null,
+        null,
         List.of(),
         null,
         null,
@@ -138,6 +147,7 @@ public record StepContext(
         previousReferences,
         List.of(),
         List.of(),
+        null,
         null,
         null,
         history,

@@ -1,0 +1,246 @@
+package com.drawe.backend.domain.llm.workflow.executor;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+
+import com.drawe.backend.domain.enums.LlmProvider;
+import com.drawe.backend.domain.enums.MessageRole;
+import com.drawe.backend.domain.llm.contract.IntentResult;
+import com.drawe.backend.domain.llm.contract.ReferenceImage;
+import com.drawe.backend.domain.llm.contract.StepContext;
+import com.drawe.backend.domain.llm.dto.LlmCallContext;
+import com.drawe.backend.domain.llm.dto.LlmCallResult;
+import com.drawe.backend.domain.llm.output.OutputIntegrityChecker;
+import com.drawe.backend.domain.llm.output.OutputParser;
+import com.drawe.backend.domain.llm.service.GrokService;
+import com.drawe.backend.domain.llm.service.LlmService;
+import com.drawe.backend.global.error.CustomException;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import java.math.BigDecimal;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.concurrent.atomic.AtomicReference;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Nested;
+import org.junit.jupiter.api.Test;
+
+/**
+ * ComposeExecutor 단위 테스트(트랙 A ④) — 합성 로직 이관 검증.
+ *
+ * <p>LlmService 는 익명 fake 로 격리하고, OutputParser·OutputIntegrityChecker 는 실제 객체를 쓴다
+ * (③에서 검증된 결정론적 순수 클래스). 검증 포인트: provider 선택, 스키마(draw_guide_response) 강제 전달,
+ * references 유무에 따른 SYSTEM turn, ③ 무결성 정정 실연결, offerGenerate 힌트, 멱등성, provider 없음 예외.
+ */
+class ComposeExecutorTest {
+
+  private final OutputParser parser = new OutputParser(new ObjectMapper());
+  private final OutputIntegrityChecker checker = new OutputIntegrityChecker();
+
+  /** content 를 고정 반환하고, 받은 LlmCallContext 를 캡처하는 fake. */
+  private static LlmService fakeLlm(
+      LlmProvider provider, String content, AtomicReference<LlmCallContext> captured) {
+    return new LlmService() {
+      @Override
+      public LlmProvider provider() {
+        return provider;
+      }
+
+      @Override
+      public LlmCallResult generate(LlmCallContext context) {
+        if (captured != null) {
+          captured.set(context);
+        }
+        return new LlmCallResult(content, "fake-model", 10);
+      }
+    };
+  }
+
+  private static List<ReferenceImage> refs(int count) {
+    List<ReferenceImage> list = new ArrayList<>();
+    for (int i = 1; i <= count; i++) {
+      list.add(new ReferenceImage((long) i, i, "u" + i, "p" + i, BigDecimal.ONE, List.of("tag" + i)));
+    }
+    return list;
+  }
+
+  private StepContext ctxWith(
+      LlmProvider provider, List<ReferenceImage> references, List<LlmCallContext.Turn> history) {
+    StepContext base =
+        StepContext.startForCompose(
+            1L, 2L, "s1", "벚꽃 그리고 싶어", "벚꽃 그리고 싶어",
+            IntentResult.of(null, IntentResult.Tier.RULE),
+            null, List.of(), history, null, null, provider);
+    return base.withReferences(references);
+  }
+
+  private ComposeExecutor executor(LlmService llm) {
+    return new ComposeExecutor(List.of(llm), parser, checker);
+  }
+
+  @Nested
+  @DisplayName("정상 합성")
+  class HappyPath {
+
+    @Test
+    @DisplayName("references 있으면 [1]참고 SYSTEM turn 추가 + 스키마 강제 + 본문/citations 채움")
+    void withReferences() {
+      AtomicReference<LlmCallContext> captured = new AtomicReference<>();
+      LlmService llm =
+          fakeLlm(
+              LlmProvider.GROK,
+              "{\"message\":\"[1]번처럼 그려보세요\",\"citations\":[1],\"offer_generate\":false}",
+              captured);
+      StepContext result =
+          executor(llm).execute(ctxWith(LlmProvider.GROK, refs(2), List.of()));
+
+      // 스키마 강제 전달
+      assertThat(captured.get().responseSchemaName())
+          .isEqualTo(GrokService.DRAW_GUIDE_SCHEMA_NAME);
+      // references SYSTEM turn 이 붙었다
+      assertThat(captured.get().history()).hasSize(1);
+      assertThat(captured.get().history().get(0).role()).isEqualTo(MessageRole.SYSTEM);
+      assertThat(captured.get().history().get(0).content()).contains("[참고 이미지]");
+      // 출력
+      assertThat(result.composedOutput().message()).isEqualTo("[1]번처럼 그려보세요");
+      assertThat(result.composedOutput().citations()).containsExactly(1);
+      assertThat(result.composedAnswer()).isEqualTo("[1]번처럼 그려보세요");
+    }
+
+    @Test
+    @DisplayName("references 없으면 '참고 없음' SYSTEM turn 추가")
+    void withoutReferences() {
+      AtomicReference<LlmCallContext> captured = new AtomicReference<>();
+      LlmService llm =
+          fakeLlm(
+              LlmProvider.GROK,
+              "{\"message\":\"자료가 부족해요\",\"citations\":[],\"offer_generate\":true}",
+              captured);
+      StepContext result =
+          executor(llm).execute(ctxWith(LlmProvider.GROK, List.of(), List.of()));
+
+      assertThat(captured.get().history().get(0).content()).contains("참고 이미지가 없습니다");
+      assertThat(result.composedOutput().offerGenerate()).isTrue();
+    }
+
+    @Test
+    @DisplayName("기존 history 뒤에 referenceContext turn 이 append 된다")
+    void appendsAfterExistingHistory() {
+      AtomicReference<LlmCallContext> captured = new AtomicReference<>();
+      LlmService llm =
+          fakeLlm(
+              LlmProvider.GROK,
+              "{\"message\":\"안녕하세요\",\"citations\":[],\"offer_generate\":false}",
+              captured);
+      List<LlmCallContext.Turn> persona =
+          List.of(new LlmCallContext.Turn(MessageRole.SYSTEM, "persona"));
+      executor(llm).execute(ctxWith(LlmProvider.GROK, refs(1), persona));
+
+      assertThat(captured.get().history()).hasSize(2);
+      assertThat(captured.get().history().get(0).content()).isEqualTo("persona");
+    }
+  }
+
+  @Nested
+  @DisplayName("③ 무결성 검사 실연결")
+  class Integrity {
+
+    @Test
+    @DisplayName("환각 인용([3], refs=2)은 본문·citations 양쪽서 제거")
+    void hallucinationRemoved() {
+      LlmService llm =
+          fakeLlm(
+              LlmProvider.GROK,
+              "{\"message\":\"[1]좋고 [3]도 좋아요\",\"citations\":[1,3],\"offer_generate\":false}",
+              null);
+      StepContext result =
+          executor(llm).execute(ctxWith(LlmProvider.GROK, refs(2), List.of()));
+
+      assertThat(result.composedOutput().citations()).containsExactly(1);
+      assertThat(result.composedOutput().message()).doesNotContain("[3]");
+      assertThat(result.composedOutput().message()).contains("[1]");
+    }
+  }
+
+  @Nested
+  @DisplayName("폴백 / offerGenerate 힌트")
+  class FallbackAndHint {
+
+    @Test
+    @DisplayName("깨진 JSON 은 원본 노출 없이 안전 템플릿으로 폴백")
+    void brokenJsonFallback() {
+      LlmService llm = fakeLlm(LlmProvider.GROK, "이건 JSON 이 아님 <원본 노출되면 안 됨>", null);
+      StepContext result =
+          executor(llm).execute(ctxWith(LlmProvider.GROK, List.of(), List.of()));
+
+      assertThat(result.composedOutput().message())
+          .isEqualTo(OutputParser.BROKEN_JSON_FALLBACK_MESSAGE);
+      assertThat(result.composedOutput().message()).doesNotContain("원본 노출");
+    }
+
+    @Test
+    @DisplayName("본문에 생성 안내 표현이 있으면 offerGenerate 강제 true")
+    void generateOfferHint() {
+      LlmService llm =
+          fakeLlm(
+              LlmProvider.GROK,
+              "{\"message\":\"원하시면 AI 이미지로 만들어드릴까요?\",\"citations\":[],\"offer_generate\":false}",
+              null);
+      StepContext result =
+          executor(llm).execute(ctxWith(LlmProvider.GROK, List.of(), List.of()));
+
+      assertThat(result.composedOutput().offerGenerate()).isTrue();
+    }
+  }
+
+  @Nested
+  @DisplayName("provider 선택 / 멱등성")
+  class ProviderAndIdempotency {
+
+    @Test
+    @DisplayName("ctx.provider 에 맞는 LlmService 가 선택된다")
+    void picksByProvider() {
+      AtomicReference<LlmCallContext> grokCaptured = new AtomicReference<>();
+      LlmService grok =
+          fakeLlm(
+              LlmProvider.GROK,
+              "{\"message\":\"grok\",\"citations\":[],\"offer_generate\":false}",
+              grokCaptured);
+      LlmService claude =
+          fakeLlm(LlmProvider.CLAUDE, "{\"message\":\"claude\",\"citations\":[]}", null);
+      ComposeExecutor exec = new ComposeExecutor(List.of(grok, claude), parser, checker);
+
+      StepContext result = exec.execute(ctxWith(LlmProvider.CLAUDE, List.of(), List.of()));
+
+      assertThat(result.composedOutput().message()).isEqualTo("claude");
+      assertThat(grokCaptured.get()).isNull(); // grok 은 호출 안 됨
+    }
+
+    @Test
+    @DisplayName("provider 에 해당하는 service 가 없으면 CustomException")
+    void missingProvider() {
+      LlmService grok =
+          fakeLlm(LlmProvider.GROK, "{\"message\":\"x\",\"citations\":[]}", null);
+      ComposeExecutor exec = new ComposeExecutor(List.of(grok), parser, checker);
+
+      assertThatThrownBy(() -> exec.execute(ctxWith(LlmProvider.CLAUDE, List.of(), List.of())))
+          .isInstanceOf(CustomException.class);
+    }
+
+    @Test
+    @DisplayName("이미 composedOutput 이 있으면 LLM 호출 없이 통과(멱등)")
+    void idempotent() {
+      AtomicReference<LlmCallContext> captured = new AtomicReference<>();
+      LlmService llm =
+          fakeLlm(LlmProvider.GROK, "{\"message\":\"new\",\"citations\":[]}", captured);
+      StepContext pre =
+          ctxWith(LlmProvider.GROK, List.of(), List.of())
+              .withComposedOutput(
+                  new com.drawe.backend.domain.llm.output.ComposedOutput("기존", List.of(), false));
+
+      StepContext result = executor(llm).execute(pre);
+
+      assertThat(result.composedOutput().message()).isEqualTo("기존");
+      assertThat(captured.get()).isNull(); // 호출 안 됨
+    }
+  }
+}
