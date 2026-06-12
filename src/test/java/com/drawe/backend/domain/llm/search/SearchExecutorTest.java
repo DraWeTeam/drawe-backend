@@ -141,6 +141,66 @@ class SearchExecutorTest {
     }
 
     @Test
+    @DisplayName("execute() — 표시필드(photographerUsername·technique·subject·mood·source) 복원")
+    void restoresDisplayFields() {
+        var searchService = mock(SearchService.class);
+        ImageResult r = newImageResult(
+                1L, "https://example.com/1.jpg", "Alice",
+                0.9f, "watercolor", "landscape", "calm");
+        when(searchService.search(any(SearchRequest.class)))
+                .thenReturn(new SearchResponse(List.of(r), 1, "watercolor"));
+        var sut = new SearchExecutor(searchService);
+
+        ReferenceImage ref =
+                sut.execute(newCtxWithKeywords(List.of("watercolor"))).references().get(0);
+
+        assertThat(ref.photographerUsername()).isEqualTo("user-1");
+        assertThat(ref.technique()).isEqualTo("watercolor");
+        assertThat(ref.subject()).isEqualTo("landscape");
+        assertThat(ref.mood()).isEqualTo("calm");
+        assertThat(ref.source()).isEqualTo("pexels");
+    }
+
+    @Test
+    @DisplayName("점수가드 — avg<0.2 || max<0.21 이면 references 차단 + searchStats.blocked=low_score")
+    void scoreGuardBlocksLowScore() {
+        var searchService = mock(SearchService.class);
+        // 점수 전부 낮음: avg≈0.1, max=0.12 → 차단
+        ImageResult r1 = newImageResult(1L, "u1", "A", 0.10f, "t", "s", "m");
+        ImageResult r2 = newImageResult(2L, "u2", "B", 0.12f, "t", "s", "m");
+        when(searchService.search(any(SearchRequest.class)))
+                .thenReturn(new SearchResponse(List.of(r1, r2), 2, "kw"));
+        var sut = new SearchExecutor(searchService);
+
+        StepContext result = sut.execute(newCtxWithKeywords(List.of("kw")));
+
+        // 차단 → references 빔
+        assertThat(result.references()).isEmpty();
+        // searchStats 는 통계·차단판정을 운반
+        assertThat(result.searchStats()).isNotNull();
+        assertThat(result.searchStats().blocked()).isTrue();
+        assertThat(result.searchStats().blockedReason()).isEqualTo("low_score");
+        assertThat(result.searchStats().resultCount()).isEqualTo(2);
+        assertThat(result.searchStats().imageIds()).containsExactly(1L, 2L);
+    }
+
+    @Test
+    @DisplayName("점수가드 — 점수 충분하면 통과 + searchStats.blocked=false")
+    void scoreGuardPassesHighScore() {
+        var searchService = mock(SearchService.class);
+        ImageResult r = newImageResult(1L, "u1", "A", 0.5f, "t", "s", "m");
+        when(searchService.search(any(SearchRequest.class)))
+                .thenReturn(new SearchResponse(List.of(r), 1, "kw"));
+        var sut = new SearchExecutor(searchService);
+
+        StepContext result = sut.execute(newCtxWithKeywords(List.of("kw")));
+
+        assertThat(result.references()).hasSize(1);
+        assertThat(result.searchStats().blocked()).isFalse();
+        assertThat(result.searchStats().blockedReason()).isNull();
+    }
+
+    @Test
     @DisplayName("execute() — utility·freeTags 도 tags 에 합산")
     void tagsIncludeUtilityAndFreeTags() {
         var searchService = mock(SearchService.class);

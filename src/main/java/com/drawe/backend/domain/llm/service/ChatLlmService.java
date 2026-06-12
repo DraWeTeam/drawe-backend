@@ -17,6 +17,7 @@ import com.drawe.backend.domain.llm.classifier.IntentResultAdapter;
 import com.drawe.backend.domain.llm.contract.IntentCode;
 import com.drawe.backend.domain.llm.contract.IntentResult;
 import com.drawe.backend.domain.llm.contract.ReferenceImage;
+import com.drawe.backend.domain.llm.contract.SearchStats;
 import com.drawe.backend.domain.llm.contract.StepContext;
 import com.drawe.backend.domain.llm.dto.*;
 import com.drawe.backend.domain.llm.metrics.LlmMetrics;
@@ -303,6 +304,11 @@ public class ChatLlmService {
           output.offerGenerate()
               || (intent.code() == IntentCode.NEW_SEARCH && refs.isEmpty());
 
+      // SEARCH analytics(SEARCH_EXECUTED/BLOCKED) — Executor 가 아니라 여기서 발사한다(갭 닫기).
+      // SearchExecutor 가 점수가드 판정·통계를 finalCtx.searchStats() 로 실어 줬다. shadow 경로는 이 메서드를
+      // 안 타므로 중복 발사되지 않는다. payload 는 레거시 handleSearchDecision 과 동등.
+      emitSearchAnalytics(user, session.getId(), finalCtx.searchStats());
+
       List<ChatResponse.ReferenceItem> refItems = toReferenceItems(refs);
 
       assistantMsg.setContent(output.message());
@@ -359,18 +365,11 @@ public class ChatLlmService {
   /**
    * live 경로 전용 어댑터 — {@link ReferenceImage}(contract) → {@link ChatResponse.ReferenceItem}.
    *
-   * <p><b>필드 결손:</b> contract {@code ReferenceImage} 는 인용 무결성에 필요한 최소 필드(id·index·url·
-   * photographer·score·tags)만 들고 있어 레거시 {@link #convertToReferenceItems}(ImageResult 기반)가 채우던
-   * {@code photographerUsername·technique·subject·mood·source} 를 복원할 수 없다 → null 로 둔다. 프론트의
-   * AI 배지(source) 등이 영향받으므로 비면 한 번 로깅한다(silent 결손 금지). 완전 복원은 ReferenceImage 확장이
-   * 필요한 별도 작업.
+   * <p>{@code ReferenceImage} 에 복원된 표시 필드(photographerUsername·technique·subject·mood·source)를
+   * 그대로 옮겨 레거시 {@link #convertToReferenceItems}(ImageResult 기반)와 동등한 ReferenceItem 을 만든다.
+   * 프론트의 AI 배지(source) 등이 정상 동작한다.
    */
   private List<ChatResponse.ReferenceItem> toReferenceItems(List<ReferenceImage> refs) {
-    if (!refs.isEmpty()) {
-      log.info(
-          "COMPOSE live: ReferenceImage→ReferenceItem 변환 — photographerUsername·technique·subject·mood·source 결손(null), count={}",
-          refs.size());
-    }
     return refs.stream()
         .map(
             r ->
@@ -378,13 +377,40 @@ public class ChatLlmService {
                     r.imageId(),
                     r.url(),
                     r.photographer(),
-                    null,
-                    null,
-                    null,
-                    null,
+                    r.photographerUsername(),
+                    r.technique(),
+                    r.subject(),
+                    r.mood(),
                     r.score() == null ? null : r.score().doubleValue(),
-                    null))
+                    r.source()))
         .toList();
+  }
+
+  /**
+   * live 경로 SEARCH analytics 발사 — {@link SearchStats}(SearchExecutor 가 채움) 기준으로 SEARCH_EXECUTED 또는
+   * SEARCH_BLOCKED 를 발사한다. payload 는 레거시 {@code handleSearchDecision} 과 동등(keyword·result_count·
+   * avg/max/min·blocked·image_ids·scores). NEW_SEARCH 가 아니거나(=SEARCH step 없음) 키워드가 없어 검색을
+   * 안 했으면 {@code searchStats} 가 null 이라 발사하지 않는다.
+   */
+  private void emitSearchAnalytics(User user, String sessionId, SearchStats stats) {
+    if (stats == null) {
+      return;
+    }
+    Map<String, Object> payload = new HashMap<>();
+    payload.put("keyword", stats.keyword());
+    payload.put("result_count", stats.resultCount());
+    payload.put("avg_score", stats.avgScore());
+    payload.put("max_score", stats.maxScore());
+    payload.put("min_score", stats.minScore());
+    payload.put("image_ids", stats.imageIds());
+    payload.put("scores", stats.scores());
+    payload.put("blocked", stats.blocked());
+    if (stats.blocked()) {
+      payload.put("blocked_reason", stats.blockedReason());
+      analyticsEventService.track(AnalyticsEventType.SEARCH_BLOCKED, user, sessionId, payload);
+    } else {
+      analyticsEventService.track(AnalyticsEventType.SEARCH_EXECUTED, user, sessionId, payload);
+    }
   }
 
   /**

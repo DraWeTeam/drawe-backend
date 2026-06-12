@@ -64,6 +64,8 @@ public record StepContext(
     // ── 누적: B ──
     List<String> keywords,
     List<ReferenceImage> references,
+    // SEARCH 점수통계·차단판정 (live 갭). SearchExecutor 가 채우고 chatViaWorkflow 가 analytics 발사에 씀.
+    SearchStats searchStats,
 
     // ── 누적: A ──
     GenerateImageResponse generatedImage,
@@ -121,6 +123,7 @@ public record StepContext(
         null,
         null,
         null,
+        null,
         List.of(),
         null,
         null,
@@ -157,6 +160,7 @@ public record StepContext(
         previousReferences,
         List.of(),
         List.of(),
+        null,
         null,
         null,
         null,
