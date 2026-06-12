@@ -8,6 +8,7 @@ import com.drawe.backend.domain.llm.contract.StepExecutor;
 import com.drawe.backend.domain.llm.contract.StepType;
 import com.drawe.backend.domain.llm.dto.LlmCallContext;
 import com.drawe.backend.domain.llm.dto.LlmCallResult;
+import com.drawe.backend.domain.llm.metrics.LlmMetrics;
 import com.drawe.backend.domain.llm.output.ComposedOutput;
 import com.drawe.backend.domain.llm.output.IntegrityResult;
 import com.drawe.backend.domain.llm.output.OutputIntegrityChecker;
@@ -59,11 +60,13 @@ public class ComposeExecutor implements StepExecutor {
   private final Map<LlmProvider, LlmService> llmServices;
   private final OutputParser outputParser;
   private final OutputIntegrityChecker integrityChecker;
+  private final LlmMetrics llmMetrics;
 
   public ComposeExecutor(
       List<LlmService> llmServices,
       OutputParser outputParser,
-      OutputIntegrityChecker integrityChecker) {
+      OutputIntegrityChecker integrityChecker,
+      LlmMetrics llmMetrics) {
     Map<LlmProvider, LlmService> map = new EnumMap<>(LlmProvider.class);
     for (LlmService s : llmServices) {
       map.put(s.provider(), s);
@@ -71,6 +74,7 @@ public class ComposeExecutor implements StepExecutor {
     this.llmServices = map;
     this.outputParser = outputParser;
     this.integrityChecker = integrityChecker;
+    this.llmMetrics = llmMetrics;
   }
 
   @Override
@@ -104,19 +108,28 @@ public class ComposeExecutor implements StepExecutor {
     LlmCallResult result = llm.generate(callContext);
 
     // 3. 파싱(깨진 JSON → 안전 템플릿 폴백, 재호출 없음) → 결정론적 무결성 검사(환각 인용 제거).
-    ComposedOutput parsed = outputParser.parse(result.content());
-    IntegrityResult integrity = integrityChecker.check(parsed, refs);
+    OutputParser.ParsedOutput parsed = outputParser.parseWithSignal(result.content());
+    IntegrityResult integrity = integrityChecker.check(parsed.output(), refs);
     ComposedOutput corrected = integrity.output();
 
     // 4. 본문에 생성 안내 표현이 있으면 offerGenerate 강제 노출(§6).
     ComposedOutput finalOutput = applyGenerateOfferHint(corrected);
 
+    // 5. DoD 메트릭(§5.2). provider 태그는 유한 열거값(GROK/CLAUDE/GEMINI).
+    String providerTag = ctx.provider() == null ? "unknown" : ctx.provider().name();
+    if (parsed.brokenJson()) {
+      // 깨진 JSON → 안전 템플릿으로 평문화됨 = 구조 위반. (스키마 거부는 LLM 호출 단의 4xx 경로가 별도로 흡수.)
+      llmMetrics.structureViolation(providerTag, "json_broke");
+    }
+    emitHallucinationMetrics(integrity);
+
     if (integrity.hadHallucination()) {
       log.info(
-          "COMPOSE 무결성 정정: refs={}, citations밖={}, 본문토큰밖={}",
+          "COMPOSE 무결성 정정: refs={}, citations밖={}, 본문토큰밖={}, no_refs={}",
           refs.size(),
           integrity.hallucinatedCitations(),
-          integrity.hallucinatedBodyTokens());
+          integrity.hallucinatedBodyTokens(),
+          integrity.noRefs());
     }
 
     // LLM 콜 트랜스포트 메타(model·latency)를 진실의 원천 옆 슬롯에 옮겨 담는다(⑤). 레거시 경로가
@@ -125,6 +138,22 @@ public class ComposeExecutor implements StepExecutor {
         .withComposedAnswer(finalOutput.message())
         .withComposeModel(result.model())
         .withComposeLatencyMs(result.latencyMs());
+  }
+
+  /**
+   * 환각 인용 메트릭 발사(§5.2, DoD 0건). source 분류: refs 가 비어 있었으면({@code no_refs}) citations·본문
+   * 위반을 모두 {@code no_refs} 로 합산한다(참고가 0인데 인용한 것이라 출처 구분이 무의미). refs 가 있었으면
+   * citations 슬롯 범위밖 = {@code citations_field}, 본문 [N] 범위밖 = {@code body_scan}. 제거 총수는
+   * 관측용 {@code citation_removed} 로 별도 발사. count 0 인 발사는 메서드 쪽에서 무시한다.
+   */
+  private void emitHallucinationMetrics(IntegrityResult integrity) {
+    if (integrity.noRefs()) {
+      llmMetrics.hallucinatedCitation("no_refs", integrity.totalRemoved());
+    } else {
+      llmMetrics.hallucinatedCitation("citations_field", integrity.hallucinatedCitations());
+      llmMetrics.hallucinatedCitation("body_scan", integrity.hallucinatedBodyTokens());
+    }
+    llmMetrics.citationRemoved(integrity.totalRemoved());
   }
 
   /** 본문에 생성 안내 표현이 있고 아직 offerGenerate=false 면 true 로 올린 새 DTO 를 반환한다. */

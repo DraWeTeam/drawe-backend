@@ -10,12 +10,14 @@ import com.drawe.backend.domain.llm.contract.ReferenceImage;
 import com.drawe.backend.domain.llm.contract.StepContext;
 import com.drawe.backend.domain.llm.dto.LlmCallContext;
 import com.drawe.backend.domain.llm.dto.LlmCallResult;
+import com.drawe.backend.domain.llm.metrics.LlmMetrics;
 import com.drawe.backend.domain.llm.output.OutputIntegrityChecker;
 import com.drawe.backend.domain.llm.output.OutputParser;
 import com.drawe.backend.domain.llm.service.GrokService;
 import com.drawe.backend.domain.llm.service.LlmService;
 import com.drawe.backend.global.error.CustomException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.List;
@@ -35,6 +37,8 @@ class ComposeExecutorTest {
 
   private final OutputParser parser = new OutputParser(new ObjectMapper());
   private final OutputIntegrityChecker checker = new OutputIntegrityChecker();
+  private final SimpleMeterRegistry registry = new SimpleMeterRegistry();
+  private final LlmMetrics metrics = new LlmMetrics(registry);
 
   /** content 를 고정 반환하고, 받은 LlmCallContext 를 캡처하는 fake. */
   private static LlmService fakeLlm(
@@ -74,7 +78,7 @@ class ComposeExecutorTest {
   }
 
   private ComposeExecutor executor(LlmService llm) {
-    return new ComposeExecutor(List.of(llm), parser, checker);
+    return new ComposeExecutor(List.of(llm), parser, checker, metrics);
   }
 
   @Nested
@@ -207,7 +211,7 @@ class ComposeExecutorTest {
               grokCaptured);
       LlmService claude =
           fakeLlm(LlmProvider.CLAUDE, "{\"message\":\"claude\",\"citations\":[]}", null);
-      ComposeExecutor exec = new ComposeExecutor(List.of(grok, claude), parser, checker);
+      ComposeExecutor exec = new ComposeExecutor(List.of(grok, claude), parser, checker, metrics);
 
       StepContext result = exec.execute(ctxWith(LlmProvider.CLAUDE, List.of(), List.of()));
 
@@ -220,7 +224,7 @@ class ComposeExecutorTest {
     void missingProvider() {
       LlmService grok =
           fakeLlm(LlmProvider.GROK, "{\"message\":\"x\",\"citations\":[]}", null);
-      ComposeExecutor exec = new ComposeExecutor(List.of(grok), parser, checker);
+      ComposeExecutor exec = new ComposeExecutor(List.of(grok), parser, checker, metrics);
 
       assertThatThrownBy(() -> exec.execute(ctxWith(LlmProvider.CLAUDE, List.of(), List.of())))
           .isInstanceOf(CustomException.class);
@@ -241,6 +245,72 @@ class ComposeExecutorTest {
 
       assertThat(result.composedOutput().message()).isEqualTo("기존");
       assertThat(captured.get()).isNull(); // 호출 안 됨
+    }
+  }
+
+  @Nested
+  @DisplayName("⑦ DoD 메트릭(§5.2)")
+  class Metrics {
+
+    private double counter(String name, String... tags) {
+      var c = registry.find(name).tags(tags).counter();
+      return c == null ? 0.0 : c.count();
+    }
+
+    @Test
+    @DisplayName("깨진 JSON → structure_violation{reason=json_broke} 발사")
+    void brokenJsonFiresStructureViolation() {
+      LlmService llm = fakeLlm(LlmProvider.GROK, "not json", null);
+      executor(llm).execute(ctxWith(LlmProvider.GROK, refs(1), List.of()));
+
+      assertThat(counter("drawe.output.structure_violation", "provider", "GROK", "reason", "json_broke"))
+          .isEqualTo(1.0);
+    }
+
+    @Test
+    @DisplayName("정상 JSON 은 structure_violation 발사 안 함")
+    void cleanJsonNoViolation() {
+      LlmService llm =
+          fakeLlm(
+              LlmProvider.GROK,
+              "{\"message\":\"[1] 좋아요\",\"citations\":[1],\"offer_generate\":false}",
+              null);
+      executor(llm).execute(ctxWith(LlmProvider.GROK, refs(1), List.of()));
+
+      assertThat(registry.find("drawe.output.structure_violation").counter()).isNull();
+      assertThat(registry.find("drawe.output.hallucinated_citation").counter()).isNull();
+    }
+
+    @Test
+    @DisplayName("refs 있는데 범위밖 인용 → hallucinated_citation{source=citations_field/body_scan} + citation_removed")
+    void rangeViolationFiresBySource() {
+      LlmService llm =
+          fakeLlm(
+              LlmProvider.GROK,
+              "{\"message\":\"[1]좋고 [3]도\",\"citations\":[1,3],\"offer_generate\":false}",
+              null);
+      executor(llm).execute(ctxWith(LlmProvider.GROK, refs(2), List.of()));
+
+      // [3] 은 citations 슬롯에서 1건, 본문에서 1건 → 각 source 1
+      assertThat(counter("drawe.output.hallucinated_citation", "source", "citations_field")).isEqualTo(1.0);
+      assertThat(counter("drawe.output.hallucinated_citation", "source", "body_scan")).isEqualTo(1.0);
+      assertThat(counter("drawe.output.hallucinated_citation", "source", "no_refs")).isZero();
+      assertThat(counter("drawe.output.citation_removed")).isEqualTo(2.0);
+    }
+
+    @Test
+    @DisplayName("refs 0인데 인용 → hallucinated_citation{source=no_refs} 로 합산")
+    void noRefsViolationTaggedNoRefs() {
+      LlmService llm =
+          fakeLlm(
+              LlmProvider.GROK,
+              "{\"message\":\"[1] 보세요\",\"citations\":[1],\"offer_generate\":false}",
+              null);
+      executor(llm).execute(ctxWith(LlmProvider.GROK, List.of(), List.of()));
+
+      assertThat(counter("drawe.output.hallucinated_citation", "source", "no_refs")).isEqualTo(2.0);
+      assertThat(counter("drawe.output.hallucinated_citation", "source", "citations_field")).isZero();
+      assertThat(counter("drawe.output.citation_removed")).isEqualTo(2.0);
     }
   }
 }

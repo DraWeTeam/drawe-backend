@@ -40,9 +40,18 @@ public class OutputParser {
    * @return 파싱 결과. 폴백 시 {@code message=}{@link #BROKEN_JSON_FALLBACK_MESSAGE}, 빈 citations, offerGenerate=false.
    */
   public ComposedOutput parse(String content) {
+    return parseWithSignal(content).output();
+  }
+
+  /**
+   * {@link #parse} 와 동일하게 파싱하되, 안전 템플릿 폴백이 일어났는지({@code brokenJson})를 함께 돌려준다.
+   * ⑦ 의 {@code drawe.output.structure_violation{reason=json_broke}} 카운터를 발사하려면 호출자(ComposeExecutor)가
+   * 폴백 여부를 알아야 하기 때문이다. 본문 텍스트 비교 같은 취약한 우회 없이 명시적 신호를 준다.
+   */
+  public ParsedOutput parseWithSignal(String content) {
     if (content == null || content.isBlank()) {
       log.warn("COMPOSE content 가 비어있음 — 안전 템플릿 폴백");
-      return fallback();
+      return new ParsedOutput(fallback(), true);
     }
 
     JsonNode root;
@@ -50,18 +59,28 @@ public class OutputParser {
       root = objectMapper.readTree(content);
     } catch (Exception e) {
       log.warn("COMPOSE content JSON 파싱 실패 — 안전 템플릿 폴백: error_class={}", e.getClass().getSimpleName());
-      return fallback();
+      return new ParsedOutput(fallback(), true);
     }
 
     JsonNode messageNode = root.get("message");
     if (messageNode == null || !messageNode.isTextual() || messageNode.asText().isBlank()) {
       log.warn("COMPOSE content 에 message 가 없거나 비어있음 — 안전 템플릿 폴백");
-      return fallback();
+      return new ParsedOutput(fallback(), true);
     }
 
-    return new ComposedOutput(
-        messageNode.asText(), readCitations(root.get("citations")), readBool(root.get("offer_generate")));
+    ComposedOutput parsed =
+        new ComposedOutput(
+            messageNode.asText(),
+            readCitations(root.get("citations")),
+            readBool(root.get("offer_generate")));
+    return new ParsedOutput(parsed, false);
   }
+
+  /**
+   * 파싱 결과 + 폴백 여부. {@code brokenJson=true} 면 {@link #BROKEN_JSON_FALLBACK_MESSAGE} 안전 템플릿으로
+   * 평문화됐다는 뜻 — ⑦ 구조 위반 메트릭(reason=json_broke)의 입력.
+   */
+  public record ParsedOutput(ComposedOutput output, boolean brokenJson) {}
 
   /** citations 배열에서 정수만 추출. 누락/비배열은 빈 리스트. 비정수 원소는 무시(무결성 검사가 범위까지 본다). */
   private List<Integer> readCitations(JsonNode node) {

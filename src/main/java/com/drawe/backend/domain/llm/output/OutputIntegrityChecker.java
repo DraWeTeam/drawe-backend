@@ -79,7 +79,8 @@ public class OutputIntegrityChecker {
 
     ComposedOutput corrected =
         new ComposedOutput(correctedMessage, new ArrayList<>(validCitations), raw.offerGenerate());
-    return new IntegrityResult(corrected, hallucinatedCitations, hallucinatedBodyTokens);
+    boolean noRefs = max == 0;
+    return new IntegrityResult(corrected, hallucinatedCitations, hallucinatedBodyTokens, noRefs);
   }
 
   /**
