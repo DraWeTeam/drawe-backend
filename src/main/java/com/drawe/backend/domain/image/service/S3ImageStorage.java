@@ -61,7 +61,15 @@ public class S3ImageStorage implements ImageStorage {
               .build();
       s3Client.putObject(req, RequestBody.fromBytes(data));
     } catch (S3Exception e) {
-      log.error("S3 업로드 실패: bucket={}, key={}, status={}", props.getBucket(), key, e.statusCode());
+      // AWS 에러 코드(AccessDenied/InvalidAccessKeyId/SignatureDoesNotMatch/NoSuchBucket 등)까지 남긴다 —
+      // status=403 만으론 권한 부족인지 자격증명 문제인지 버킷 부재인지 구분이 안 된다.
+      log.error(
+          "S3 업로드 실패: bucket={}, key={}, status={}, awsErrorCode={}, msg={}",
+          props.getBucket(),
+          key,
+          e.statusCode(),
+          e.awsErrorDetails() != null ? e.awsErrorDetails().errorCode() : "unknown",
+          e.awsErrorDetails() != null ? e.awsErrorDetails().errorMessage() : e.getMessage());
       throw new CustomException(ErrorCode.AI_SERVICE_ERROR);
     }
     log.info("S3 이미지 저장 완료: bucket={}, key={}, size={}", props.getBucket(), key, data.length);
