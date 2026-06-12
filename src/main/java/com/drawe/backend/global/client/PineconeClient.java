@@ -75,17 +75,34 @@ public class PineconeClient {
   }
 
   /**
-   * 벡터 하나를 Pinecone에 upsert. AI 이미지 적재용.
+   * 벡터 하나를 default namespace("") 에 upsert. AI 이미지(일반) 적재용.
    *
    * @param id Pinecone vector ID. Image.sourceId와 동일 값을 사용 (예: "ai_1234")
    * @param vector L2 정규화된 768차원 CLIP 벡터
    * @param metadata 필터·노출용 메타. 최소 source, createdByUserId, prompt 포함 권장
    */
+  public void upsert(String id, List<Float> vector, java.util.Map<String, Object> metadata) {
+    upsert(id, vector, metadata, null);
+  }
+
+  /**
+   * 벡터 하나를 지정 namespace 에 upsert.
+   *
+   * <p>{@code namespace} 가 null 이면 default namespace("") — 기존 일반 적재와 동일. 가이드용
+   * 이미지 벡터는 일반 검색에 섞이지 않도록 별도 namespace(예: {@code "guide"}) 로 분리한다. 설계:
+   * {@code docs/decisions/S3-guide-namespace-design.md}.
+   *
+   * @param id Pinecone vector ID. Image.sourceId와 동일 값을 사용 (예: "ai_1234")
+   * @param vector L2 정규화된 768차원 CLIP 벡터
+   * @param metadata 필터·노출용 메타. 최소 source, createdByUserId, prompt 포함 권장
+   * @param namespace 적재 대상 namespace. null 이면 default("")
+   */
   @CircuitBreaker(name = "vector")
   @Retry(name = "vector")
-  public void upsert(String id, List<Float> vector, java.util.Map<String, Object> metadata) {
+  public void upsert(
+      String id, List<Float> vector, java.util.Map<String, Object> metadata, String namespace) {
     PineconeUpsertRequest body =
-        new PineconeUpsertRequest(List.of(new PineconeVector(id, vector, metadata)));
+        new PineconeUpsertRequest(List.of(new PineconeVector(id, vector, metadata)), namespace);
     webClient
         .post()
         .uri("/vectors/upsert")
@@ -94,6 +111,6 @@ public class PineconeClient {
         .toBodilessEntity()
         .timeout(timeout)
         .block();
-    log.debug("Pinecone upsert 완료: id={}", id);
+    log.debug("Pinecone upsert 완료: id={}, namespace={}", id, namespace == null ? "" : namespace);
   }
 }
