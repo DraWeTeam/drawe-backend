@@ -17,9 +17,20 @@ class PersonaRegistryTest {
   private final PersonaRegistry registry = new PersonaRegistry();
 
   @Test
-  @DisplayName("DEFAULT_KEY 는 아직 v1(FRIENDLY_01) — A/B 관측 전이라 전환 안 함")
-  void defaultKeyStaysV1() {
-    assertThat(PersonaRegistry.DEFAULT_KEY).isEqualTo("FRIENDLY_01");
+  @DisplayName("DEFAULT_KEY 는 v2(FRIENDLY_02) — 거절/인사 톤 완화 반영")
+  void defaultKeyIsV2() {
+    assertThat(PersonaRegistry.DEFAULT_KEY).isEqualTo("FRIENDLY_02");
+  }
+
+  @Test
+  @DisplayName("v2(=기본) 는 거절을 다양화하고 인사·감사를 거절하지 않는다")
+  void v2SoftensRefusalAndGreetings() {
+    String v2 = registry.resolve(PersonaRegistry.DEFAULT_KEY);
+    // 단일 고정 거절 문구가 아니라 상황별 다양화 지시
+    assertThat(v2).contains("매번 똑같은 문장을 반복하지 말고");
+    // 인사·감사는 거절 대상이 아님을 명시
+    assertThat(v2).contains("인사·감사·가벼운 반응");
+    assertThat(v2).contains("거절 대상이 절대 아니다");
   }
 
   @Test

@@ -123,11 +123,10 @@ public class ChatLlmService {
     if (!references.isEmpty()) {
       String referenceContext = buildReferenceContext(references);
       history.add(new LlmCallContext.Turn(MessageRole.SYSTEM, referenceContext));
-    } else {
-      // 레퍼런스가 없을 때:
-      // 답변은 짧고 단정한 한 줄로 — "자료가 부족한 것 같아요. AI 이미지로 생성해드릴까요?" 류.
-      // 시스템이 이 답변과 함께 생성 버튼을 자동 노출한다 (offerGenerate=true).
-      // LLM 본인이 이미지를 만든 척하는 표현은 금지.
+    } else if (decision.action() == ExtractionResult.Action.NEW_SEARCH) {
+      // NEW_SEARCH 인데 검색 결과가 비었을 때만 'AI 생성 제안' 톤으로 마무리한다.
+      // (SKIP/KEEP 은 애초에 검색을 안 했으므로 이 안내가 부적절 — 아래 분기로 빠진다.)
+      // 답변은 짧고 단정한 한 줄로. 시스템이 이 답변과 함께 생성 버튼을 자동 노출한다(offerGenerate=true).
       history.add(
           new LlmCallContext.Turn(
               MessageRole.SYSTEM,
@@ -144,6 +143,25 @@ public class ChatLlmService {
                   + "- 네가 만들지 않은 이미지를 만든 척하는 표현:\n"
                   + "  \"만들어왔어요\", \"만들어드렸어요\", \"준비해봤어요\", \"여기 이미지요\" 등.\n"
                   + "- \"잠시만요\", \"어떤 분위기·구도\"처럼 길게 되묻거나 약속을 늘이지 마세요."));
+    } else {
+      // SKIP/KEEP — 인사·감사·확인 같은 단독 표현이거나 이전 맥락 유지. 검색을 안 했으니
+      // 'AI 생성 제안'·'참고 이미지 없음' 안내는 부적절하다. 사용자의 말에 자연스럽게 반응만 한다.
+      history.add(
+          new LlmCallContext.Turn(
+              MessageRole.SYSTEM,
+              "[대화 안내]\n"
+                  + "이번 발화는 검색이 필요 없는 짧은 대화(인사·감사·확인·가벼운 반응)입니다.\n"
+                  + "\n"
+                  + "응답 가이드:\n"
+                  + "- 사용자의 말에 자연스럽고 따뜻하게 한두 문장으로 반응하세요.\n"
+                  + "- 감사 인사엔 가볍게 받아주세요. 예: \"천만에요! 또 막히는 부분 있으면 편하게 말해요.\"\n"
+                  + "- 굳이 새 주제를 강요하거나 \"그림 얘기로 돌아올까요?\"처럼 형식적으로 되묻지 마세요.\n"
+                  + "- 대화가 자연스럽게 이어지도록, 필요하면 가볍게 다음을 권하는 정도면 충분합니다.\n"
+                  + "\n"
+                  + "금지:\n"
+                  + "- [1], [2] 같은 인용 표현 (참고 이미지 없음).\n"
+                  + "- AI 이미지 생성 제안 (지금 맥락이 아님).\n"
+                  + "- 만들지 않은 이미지를 만든 척하는 표현."));
     }
 
     LlmProvider provider = resolveProvider(user);
