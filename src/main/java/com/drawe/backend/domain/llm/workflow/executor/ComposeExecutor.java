@@ -119,7 +119,12 @@ public class ComposeExecutor implements StepExecutor {
           integrity.hallucinatedBodyTokens());
     }
 
-    return ctx.withComposedOutput(finalOutput).withComposedAnswer(finalOutput.message());
+    // LLM 콜 트랜스포트 메타(model·latency)를 진실의 원천 옆 슬롯에 옮겨 담는다(⑤). 레거시 경로가
+    // result.model()/result.latencyMs() 로 assistantMsg·llmMetrics 를 채우던 것을 live 경로에서 재현하기 위함.
+    return ctx.withComposedOutput(finalOutput)
+        .withComposedAnswer(finalOutput.message())
+        .withComposeModel(result.model())
+        .withComposeLatencyMs(result.latencyMs());
   }
 
   /** 본문에 생성 안내 표현이 있고 아직 offerGenerate=false 면 true 로 올린 새 DTO 를 반환한다. */

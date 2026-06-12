@@ -19,7 +19,7 @@ import lombok.With;
  *       userId, projectId, sessionId, rawMessage, cleanedMessage, intent, uploadedImageUrl, previousReferences</li>
  *   <li><b>누적</b> (B 가 채움): keywords, references</li>
  *   <li><b>입력</b> (A 의 분류 단계가 채움, COMPOSE 가 읽음 — S2'): history, uploadedImageBytes, uploadedImageMimeType, provider</li>
- *   <li><b>누적</b> (A 가 채움): generatedImage, composedAnswer, composedOutput</li>
+ *   <li><b>누적</b> (A 가 채움): generatedImage, composedAnswer, composedOutput, composeModel, composeLatencyMs</li>
  * </ul>
  *
  * <h3>composedOutput vs composedAnswer (S2' 트랙 A ④)</h3>
@@ -74,7 +74,15 @@ public record StepContext(
     List<LlmCallContext.Turn> history,
     byte[] uploadedImageBytes,
     String uploadedImageMimeType,
-    LlmProvider provider
+    LlmProvider provider,
+
+    // ── 누적: A 의 COMPOSE 가 채우는 LLM 콜 메타 (S2' ⑤) ──
+    // composedOutput 은 파싱·무결성 검사를 거친 "정정된 합성 결과"라 LLM 콜 트랜스포트 메타(model·latency)를
+    // 담기엔 결이 다르다(파서·체커는 이 값을 알지도 못한다). 그래서 진실의 원천 옆에 별도 슬롯으로 둔다 —
+    // ComposeExecutor 가 LlmCallResult 에서 그대로 옮겨 담고, ⑤ 메인경로 매핑이 assistantMsg.model·latencyMs·
+    // llmMetrics.llmCall 로 흘려보낸다. 레거시 경로의 result.model()/result.latencyMs() 와 동치.
+    String composeModel,
+    Integer composeLatencyMs
 ) {
 
   public StepContext {
@@ -116,6 +124,8 @@ public record StepContext(
         List.of(),
         null,
         null,
+        null,
+        null,
         null);
   }
 
@@ -153,6 +163,8 @@ public record StepContext(
         history,
         uploadedImageBytes,
         uploadedImageMimeType,
-        provider);
+        provider,
+        null,
+        null);
   }
 }

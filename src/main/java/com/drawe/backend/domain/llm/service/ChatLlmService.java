@@ -14,11 +14,13 @@ import com.drawe.backend.domain.enums.UserPlan;
 import com.drawe.backend.domain.image.service.ImageGenerationService;
 import com.drawe.backend.domain.image.service.ImageUrlSigner;
 import com.drawe.backend.domain.llm.classifier.IntentResultAdapter;
+import com.drawe.backend.domain.llm.contract.IntentCode;
 import com.drawe.backend.domain.llm.contract.IntentResult;
 import com.drawe.backend.domain.llm.contract.ReferenceImage;
 import com.drawe.backend.domain.llm.contract.StepContext;
 import com.drawe.backend.domain.llm.dto.*;
 import com.drawe.backend.domain.llm.metrics.LlmMetrics;
+import com.drawe.backend.domain.llm.output.ComposedOutput;
 import com.drawe.backend.domain.llm.workflow.WorkflowService;
 import com.drawe.backend.domain.llm.repository.ChatSessionRepository;
 import com.drawe.backend.domain.llm.repository.LlmMessageRepository;
@@ -30,6 +32,7 @@ import com.drawe.backend.domain.search.dto.SearchRequest;
 import com.drawe.backend.domain.search.dto.SearchResponse;
 import com.drawe.backend.domain.search.service.SearchService;
 import com.drawe.backend.global.config.LlmProperties;
+import com.drawe.backend.global.config.WorkflowComposeProperties;
 import com.drawe.backend.global.error.CustomException;
 import com.drawe.backend.global.error.ErrorCode;
 import io.micrometer.core.instrument.MeterRegistry;
@@ -72,6 +75,7 @@ public class ChatLlmService {
   private final UserPrefSummaryService userPrefSummaryService;
   private final AnalyticsEventService analyticsEventService;
   private final ImageUrlSigner imageUrlSigner;
+  private final WorkflowComposeProperties workflowComposeProperties;
 
   @Transactional
   public ChatResponse chat(User user, Long projectId, ChatRequest request) {
@@ -98,6 +102,14 @@ public class ChatLlmService {
     // 바로 Bria 호출해서 응답에 생성된 이미지 url 을 담아 돌려준다.
     if (decision.action() == ExtractionResult.Action.GENERATE_NOW) {
       return handleGenerateNow(user, project, session, request, decision);
+    }
+
+    // ⑤ 메인경로 전환(shadow→live): 의도가 live 플래그에 켜져 있으면 레거시 직접 합성 대신
+    // 전체 워크플로(WorkflowService)로 응답을 만든다. 기본은 전부 off 라 아래 레거시 경로가 그대로 돈다.
+    IntentResult intent =
+        intentResultAdapter.adapt(decision, routed.ruleDecided(), List.of(), image.hasImage());
+    if (workflowComposeProperties.isLive(intent.code())) {
+      return chatViaWorkflow(user, project, session, request, image, history, intent);
     }
 
     List<ImageResult> references =
@@ -215,6 +227,164 @@ public class ChatLlmService {
       trackError(user, session.getId(), provider, e);
       throw new CustomException(ErrorCode.AI_SERVICE_ERROR);
     }
+  }
+
+  /**
+   * ⑤ live 경로 — 전체 워크플로({@link WorkflowService})로 응답을 합성한다(설계 §3.3 "2번: 전체 워크플로").
+   *
+   * <p>레거시 {@link #chat} 직접 합성과 책임 분담은 같다: <b>합성(검색→referenceContext→스키마 강제 LLM→파싱→
+   * 무결성)은 Executor</b>, <b>저장·analytics·메트릭·ChatResponse 조립은 여기</b>. {@code startForCompose} 로
+   * history(persona 포함)·이미지·provider 를 실어 보내고, 결과 {@code finalCtx.composedOutput()} 에서
+   * message·citations·offerGenerate 를, {@code composeModel/composeLatencyMs} 에서 메타를 꺼낸다.
+   *
+   * <p><b>⚠ 베타 안전장치 손실(silent 전환 금지):</b> 이 경로는 레거시 {@code handleSearchDecision} 의 점수 가드
+   * (avg&lt;0.2 || max&lt;0.21 무관 결과 차단)·SEARCH_EXECUTED/BLOCKED analytics 를 아직 재현하지 않고, 검색
+   * 키워드도 Grok→Komoran(EXTRACT_KEYWORDS)로 바뀐다. 켜질 때마다 한 줄 WARN 으로 남긴다. 갭은 ⑦에서 닫는다.
+   */
+  private ChatResponse chatViaWorkflow(
+      User user,
+      Project project,
+      ChatSession session,
+      ChatRequest request,
+      ImageInputResolver.Resolved image,
+      List<LlmCallContext.Turn> history,
+      IntentResult intent) {
+
+    log.warn(
+        "⚙️ COMPOSE live 경로: code={} session={} — 레거시 점수가드·검색 analytics 미재현, 키워드 Grok→Komoran 전환됨(갭은 ⑦에서 닫음)",
+        intent.code().code(),
+        session.getId());
+
+    LlmProvider provider = resolveProvider(user);
+
+    StepContext initial =
+        StepContext.startForCompose(
+            user.getId(),
+            project.getId(),
+            session.getId(),
+            request.message(),
+            request.message(),
+            intent,
+            request.imageUrl(),
+            List.of(),
+            history,
+            image.bytes(),
+            image.mimeType(),
+            provider);
+
+    // 사용자 메시지 저장 (레거시와 동일 — 합성 성공 여부와 무관하게 사용자 입력은 남긴다).
+    LlmMessage userMsg = new LlmMessage();
+    userMsg.setChatSession(session);
+    userMsg.setRole(MessageRole.USER);
+    userMsg.setContent(request.message());
+    userMsg.setHasImage(image.hasImage());
+    userMsg.setImageUrl(image.storedUrl());
+    llmMessageRepository.save(userMsg);
+
+    LlmMessage assistantMsg = new LlmMessage();
+    assistantMsg.setChatSession(session);
+    assistantMsg.setRole(MessageRole.ASSISTANT);
+    assistantMsg.setProvider(provider);
+    assistantMsg.setHasImage(false);
+
+    long llmStart = System.nanoTime();
+    try {
+      StepContext finalCtx = workflowService.run(intent, initial);
+
+      ComposedOutput output = finalCtx.composedOutput();
+      if (output == null) {
+        // COMPOSE 가 끝까지 못 갔다(예: step 예외로 부분 성공). 레거시처럼 AI_SERVICE_ERROR 로 떨어뜨린다.
+        log.error("COMPOSE live: composedOutput 이 null — 워크플로 미완. session={}", session.getId());
+        throw new CustomException(ErrorCode.AI_SERVICE_ERROR);
+      }
+
+      List<ReferenceImage> refs = finalCtx.references();
+      boolean offerGenerate =
+          output.offerGenerate()
+              || (intent.code() == IntentCode.NEW_SEARCH && refs.isEmpty());
+
+      List<ChatResponse.ReferenceItem> refItems = toReferenceItems(refs);
+
+      assistantMsg.setContent(output.message());
+      assistantMsg.setModel(finalCtx.composeModel());
+      assistantMsg.setLatencyMs(finalCtx.composeLatencyMs() == null ? 0 : finalCtx.composeLatencyMs());
+      assistantMsg.setStatus(LlmCallStatus.SUCCESS);
+      if (!refItems.isEmpty()) {
+        assistantMsg.setReferences(refItems);
+      }
+      llmMessageRepository.save(assistantMsg);
+      session.setLastActive(Instant.now());
+
+      int latencyMs = finalCtx.composeLatencyMs() == null ? 0 : finalCtx.composeLatencyMs();
+      Map<String, Object> successPayload = new HashMap<>();
+      successPayload.put("latency_ms", latencyMs);
+      successPayload.put("response_length", output.message() != null ? output.message().length() : 0);
+      successPayload.put("provider", provider.name());
+      successPayload.put("model", finalCtx.composeModel());
+      successPayload.put("reference_count", refItems.size());
+      successPayload.put("has_image_input", image.hasImage());
+      successPayload.put("offer_generate", offerGenerate);
+      successPayload.put("workflow_live", true);
+      analyticsEventService.track(
+          AnalyticsEventType.CHAT_SUCCESS, user, session.getId(), successPayload);
+      llmMetrics.llmCall(provider.name(), Duration.ofMillis(latencyMs), true);
+
+      return new ChatResponse(
+          session.getId(),
+          "guide",
+          output.message(),
+          signReferenceUrls(refItems),
+          intent.code() == IntentCode.NEW_SEARCH ? "NEW_SEARCH" : intent.code().code(),
+          offerGenerate,
+          offerGenerate ? request.message() : null,
+          null);
+    } catch (CustomException e) {
+      llmMetrics.llmCall(provider.name(), Duration.ofNanos(System.nanoTime() - llmStart), false);
+      persistFailure(assistantMsg, e);
+      trackError(user, session.getId(), provider, e);
+      throw e;
+    } catch (Exception e) {
+      llmMetrics.llmCall(provider.name(), Duration.ofNanos(System.nanoTime() - llmStart), false);
+      log.error(
+          "COMPOSE live 실패 session={} provider={} error_class={}",
+          session.getId(),
+          provider,
+          e.getClass().getSimpleName());
+      persistFailure(assistantMsg, e);
+      trackError(user, session.getId(), provider, e);
+      throw new CustomException(ErrorCode.AI_SERVICE_ERROR);
+    }
+  }
+
+  /**
+   * live 경로 전용 어댑터 — {@link ReferenceImage}(contract) → {@link ChatResponse.ReferenceItem}.
+   *
+   * <p><b>필드 결손:</b> contract {@code ReferenceImage} 는 인용 무결성에 필요한 최소 필드(id·index·url·
+   * photographer·score·tags)만 들고 있어 레거시 {@link #convertToReferenceItems}(ImageResult 기반)가 채우던
+   * {@code photographerUsername·technique·subject·mood·source} 를 복원할 수 없다 → null 로 둔다. 프론트의
+   * AI 배지(source) 등이 영향받으므로 비면 한 번 로깅한다(silent 결손 금지). 완전 복원은 ReferenceImage 확장이
+   * 필요한 별도 작업.
+   */
+  private List<ChatResponse.ReferenceItem> toReferenceItems(List<ReferenceImage> refs) {
+    if (!refs.isEmpty()) {
+      log.info(
+          "COMPOSE live: ReferenceImage→ReferenceItem 변환 — photographerUsername·technique·subject·mood·source 결손(null), count={}",
+          refs.size());
+    }
+    return refs.stream()
+        .map(
+            r ->
+                new ChatResponse.ReferenceItem(
+                    r.imageId(),
+                    r.url(),
+                    r.photographer(),
+                    null,
+                    null,
+                    null,
+                    null,
+                    r.score() == null ? null : r.score().doubleValue(),
+                    null))
+        .toList();
   }
 
   /**
