@@ -53,6 +53,12 @@ dependencies {
     // Komoran 형태소 분석 (PoC)
     implementation 'com.github.shin285:KOMORAN:3.3.9'
 
+    // S2' Phase 6 Layer 1 — JTokkit (토큰 카운팅)
+    implementation 'com.knuddels:jtokkit:1.1.0'
+
+    // Jackson JSR-310 (Instant 직렬화) — 이미 spring-boot-starter-web 에 포함되어 있을 가능성 ↑
+    implementation 'com.fasterxml.jackson.datatype:jackson-datatype-jsr310'
+
     // ── Observability — Actuator + Micrometer ───────────────
     // 클라우드 배포용. health probe (liveness/readiness) + metrics endpoint (/actuator/prometheus)
     implementation 'org.springframework.boot:spring-boot-starter-actuator'
