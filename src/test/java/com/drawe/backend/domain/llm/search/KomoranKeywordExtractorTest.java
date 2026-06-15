@@ -163,11 +163,14 @@ class KomoranKeywordExtractorTest {
     }
 
     @Test
-    @DisplayName("extract — PoC: 수채화로 그린 고양이 더 보여줘")
+    @DisplayName("extract — PoC: 수채화로 그린 고양이 더 보여줘 → [watercolor, cat] ('그리'=draw 요청동사는 STOPWORD)")
     void extractPoCSample01() {
+        // '그리/그려/그렸'(그리다=draw 요청동사)는 '주요 키워드만 추출' 방침으로 STOPWORD 처리 → drawing 미추출.
+        // (명사 '그림'은 별개 형태소라 그대로 drawing 으로 추출됨.) 2026-06 트랙 B 결정 — A 싱크 대상.
         List<String> keywords = extractor.extract("수채화로 그린 고양이 더 보여줘");
 
-        assertThat(keywords).contains("watercolor", "drawing", "cat");
+        assertThat(keywords).contains("watercolor", "cat");
+        assertThat(keywords).doesNotContain("drawing");
     }
 
     @Test
