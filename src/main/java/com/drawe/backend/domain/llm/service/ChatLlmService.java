@@ -369,7 +369,7 @@ public class ChatLlmService {
           "guide",
           output.message(),
           signReferenceUrls(refItems),
-          intent.code() == IntentCode.NEW_SEARCH ? "NEW_SEARCH" : intent.code().code(),
+          referencesAction(intent.code()),
           offerGenerate,
           offerGenerate ? request.message() : null,
           null);
@@ -389,6 +389,21 @@ public class ChatLlmService {
       trackError(user, session.getId(), provider, e);
       throw new CustomException(ErrorCode.AI_SERVICE_ERROR);
     }
+  }
+
+  /**
+   * IntentCode → 프론트 노출용 referencesAction 문자열. <b>숫자 코드("006"/"010" 등)를 절대 노출하지 않는다</b> —
+   * 레거시 chat() 은 {@code decision.action().name()}("NEW_SEARCH"/"KEEP"/"SKIP") 문자열을 줬고, 프론트 계약도
+   * 그 문자열 기준이다. NEW_SEARCH·SELF_CRITIQUE 는 고유 의미라 그대로, 그 외 COMPOSE 종착 의도(KEEP·SKIP·001~004
+   * 미술의도)는 "참고 유지" 의미로 처리한다.
+   */
+  private static String referencesAction(IntentCode code) {
+    return switch (code) {
+      case NEW_SEARCH -> "NEW_SEARCH";
+      case SELF_CRITIQUE -> "SELF_CRITIQUE";
+      case SKIP -> "SKIP";
+      default -> "KEEP"; // KEEP(006) + 미술의도 001~004 등
+    };
   }
 
   /**
