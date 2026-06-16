@@ -14,6 +14,7 @@ import com.drawe.backend.domain.enums.UserPlan;
 import com.drawe.backend.domain.image.service.ImageGenerationService;
 import com.drawe.backend.domain.image.service.ImageUrlSigner;
 import com.drawe.backend.domain.llm.classifier.IntentResultAdapter;
+import com.drawe.backend.domain.llm.context.TokenAwareHistoryTrimmer;
 import com.drawe.backend.domain.llm.contract.IntentCode;
 import com.drawe.backend.domain.llm.contract.IntentResult;
 import com.drawe.backend.domain.llm.contract.ReferenceImage;
@@ -34,14 +35,12 @@ import com.drawe.backend.domain.search.dto.ImageResult;
 import com.drawe.backend.domain.search.dto.SearchRequest;
 import com.drawe.backend.domain.search.dto.SearchResponse;
 import com.drawe.backend.domain.search.service.SearchService;
-import com.drawe.backend.global.config.LlmProperties;
 import com.drawe.backend.global.config.WorkflowComposeProperties;
 import com.drawe.backend.global.error.CustomException;
 import com.drawe.backend.global.error.ErrorCode;
 import io.micrometer.core.instrument.MeterRegistry;
 import java.time.Duration;
 import java.time.Instant;
-import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -62,7 +61,6 @@ public class ChatLlmService {
   private final ProjectRepository projectRepository;
   private final LlmMessageRepository llmMessageRepository;
   private final PersonaRegistry personaRegistry;
-  private final LlmProperties llmProperties;
   private final ImageInputResolver imageInputResolver;
   private final List<LlmService> llmServices;
 
@@ -80,6 +78,7 @@ public class ChatLlmService {
   private final ImageUrlSigner imageUrlSigner;
   private final WorkflowComposeProperties workflowComposeProperties;
   private final SessionService sessionService;
+  private final TokenAwareHistoryTrimmer tokenAwareHistoryTrimmer;
 
   @Transactional
   public ChatResponse chat(User user, Long projectId, ChatRequest request) {
@@ -95,7 +94,14 @@ public class ChatLlmService {
     ImageInputResolver.Resolved image = imageInputResolver.resolve(user, request.imageUrl());
 
     List<LlmMessage> all = llmMessageRepository.findByChatSessionOrderByCreatedAtAsc(session);
-    List<LlmCallContext.Turn> history = trimHistory(all, llmProperties.getMaxHistory());
+    // Phase6 Layer1~4: 토큰 예산 기반 history 구성 (SYSTEM systemBudget + [N] sanitize + topic-aware trim).
+    // 기존 개수 기반 trimHistory 를 대체. 분기 전 공통부라 레거시·live 경로 둘 다 적용된다.
+    List<LlmCallContext.Turn> turns =
+        all.stream()
+            .filter(m -> m.getStatus() != LlmCallStatus.FAILED)
+            .map(m -> new LlmCallContext.Turn(m.getRole(), m.getContent()))
+            .toList();
+    List<LlmCallContext.Turn> history = tokenAwareHistoryTrimmer.trim(turns, request.message());
 
     // 검색 결정: 결정론적 룰 프리라우터 먼저 → 미스면 Grok 풀 분류로 폴백.
     // 명확한 기능 신호(인사·감사·명시적 생성)는 LLM 콜 없이 룰로 끝낸다 (S1' 트랙 A).
@@ -1050,26 +1056,6 @@ public class ChatLlmService {
         .filter(s -> s.provider() == provider)
         .findFirst()
         .orElseThrow(() -> new CustomException(ErrorCode.INVALID_INPUT));
-  }
-
-  private List<LlmCallContext.Turn> trimHistory(List<LlmMessage> all, int maxNonSystem) {
-    List<LlmCallContext.Turn> systems = new ArrayList<>();
-    List<LlmCallContext.Turn> rest = new ArrayList<>();
-    for (LlmMessage m : all) {
-      if (m.getStatus() == LlmCallStatus.FAILED) {
-        continue;
-      }
-      LlmCallContext.Turn turn = new LlmCallContext.Turn(m.getRole(), m.getContent());
-      if (m.getRole() == MessageRole.SYSTEM) {
-        systems.add(turn);
-      } else {
-        rest.add(turn);
-      }
-    }
-    int from = Math.max(0, rest.size() - maxNonSystem);
-    List<LlmCallContext.Turn> trimmed = new ArrayList<>(systems);
-    trimmed.addAll(rest.subList(from, rest.size()));
-    return trimmed;
   }
 
   private void persistFailure(LlmMessage assistantMsg, Exception e) {
