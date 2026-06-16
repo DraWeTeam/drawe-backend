@@ -28,7 +28,10 @@ public class TranslateExecutor implements StepExecutor {
   @Override
   public StepContext execute(StepContext ctx) {
     // 골격: PromptTranslator 위임 미이관. 컨텍스트 통과.
-    log.debug("TRANSLATE 골격 — 변환 미이관, 컨텍스트 통과");
+    // 이 골격이 실제 실행됐다 = 미구현 의도(GENERATE 등)가 live 워크플로에 도달했다는 신호.
+    // GENERATE 시퀀스엔 COMPOSE 가 없어 그대로 두면 composedOutput=null→500 으로 이어진다(R1).
+    // 정상 경로면 WorkflowComposeProperties 부팅 검증이 이미 막으므로, 여기 WARN 이 찍히면 라우팅/게이트 회귀다.
+    log.warn("TRANSLATE 골격 실행됨 — 변환 미이관(미구현 의도가 live 도달). composedOutput=null→500 위험 신호.");
     return ctx;
   }
 }

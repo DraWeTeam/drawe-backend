@@ -14,6 +14,7 @@ import com.drawe.backend.domain.enums.UserPlan;
 import com.drawe.backend.domain.image.service.ImageGenerationService;
 import com.drawe.backend.domain.image.service.ImageUrlSigner;
 import com.drawe.backend.domain.llm.classifier.IntentResultAdapter;
+import com.drawe.backend.domain.llm.context.TokenAwareHistoryTrimmer;
 import com.drawe.backend.domain.llm.contract.IntentCode;
 import com.drawe.backend.domain.llm.contract.IntentResult;
 import com.drawe.backend.domain.llm.contract.ReferenceImage;
@@ -25,6 +26,8 @@ import com.drawe.backend.domain.llm.output.ComposedOutput;
 import com.drawe.backend.domain.llm.workflow.WorkflowService;
 import com.drawe.backend.domain.llm.repository.ChatSessionRepository;
 import com.drawe.backend.domain.llm.repository.LlmMessageRepository;
+import com.drawe.backend.domain.llm.session.SessionData;
+import com.drawe.backend.domain.llm.session.SessionService;
 import com.drawe.backend.domain.log.SearchLogService;
 import com.drawe.backend.domain.onboarding.UserPrefSummaryService;
 import com.drawe.backend.domain.project.repository.ProjectRepository;
@@ -32,14 +35,12 @@ import com.drawe.backend.domain.search.dto.ImageResult;
 import com.drawe.backend.domain.search.dto.SearchRequest;
 import com.drawe.backend.domain.search.dto.SearchResponse;
 import com.drawe.backend.domain.search.service.SearchService;
-import com.drawe.backend.global.config.LlmProperties;
 import com.drawe.backend.global.config.WorkflowComposeProperties;
 import com.drawe.backend.global.error.CustomException;
 import com.drawe.backend.global.error.ErrorCode;
 import io.micrometer.core.instrument.MeterRegistry;
 import java.time.Duration;
 import java.time.Instant;
-import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -60,7 +61,6 @@ public class ChatLlmService {
   private final ProjectRepository projectRepository;
   private final LlmMessageRepository llmMessageRepository;
   private final PersonaRegistry personaRegistry;
-  private final LlmProperties llmProperties;
   private final ImageInputResolver imageInputResolver;
   private final List<LlmService> llmServices;
 
@@ -77,6 +77,8 @@ public class ChatLlmService {
   private final AnalyticsEventService analyticsEventService;
   private final ImageUrlSigner imageUrlSigner;
   private final WorkflowComposeProperties workflowComposeProperties;
+  private final SessionService sessionService;
+  private final TokenAwareHistoryTrimmer tokenAwareHistoryTrimmer;
 
   @Transactional
   public ChatResponse chat(User user, Long projectId, ChatRequest request) {
@@ -92,7 +94,14 @@ public class ChatLlmService {
     ImageInputResolver.Resolved image = imageInputResolver.resolve(user, request.imageUrl());
 
     List<LlmMessage> all = llmMessageRepository.findByChatSessionOrderByCreatedAtAsc(session);
-    List<LlmCallContext.Turn> history = trimHistory(all, llmProperties.getMaxHistory());
+    // Phase6 Layer1~4: 토큰 예산 기반 history 구성 (SYSTEM systemBudget + [N] sanitize + topic-aware trim).
+    // 기존 개수 기반 trimHistory 를 대체. 분기 전 공통부라 레거시·live 경로 둘 다 적용된다.
+    List<LlmCallContext.Turn> turns =
+        all.stream()
+            .filter(m -> m.getStatus() != LlmCallStatus.FAILED)
+            .map(m -> new LlmCallContext.Turn(m.getRole(), m.getContent()))
+            .toList();
+    List<LlmCallContext.Turn> history = tokenAwareHistoryTrimmer.trim(turns, request.message());
 
     // 검색 결정: 결정론적 룰 프리라우터 먼저 → 미스면 Grok 풀 분류로 폴백.
     // 명확한 기능 신호(인사·감사·명시적 생성)는 LLM 콜 없이 룰로 끝낸다 (S1' 트랙 A).
@@ -256,9 +265,13 @@ public class ChatLlmService {
    * history(persona 포함)·이미지·provider 를 실어 보내고, 결과 {@code finalCtx.composedOutput()} 에서
    * message·citations·offerGenerate 를, {@code composeModel/composeLatencyMs} 에서 메타를 꺼낸다.
    *
-   * <p><b>⚠ 베타 안전장치 손실(silent 전환 금지):</b> 이 경로는 레거시 {@code handleSearchDecision} 의 점수 가드
-   * (avg&lt;0.2 || max&lt;0.21 무관 결과 차단)·SEARCH_EXECUTED/BLOCKED analytics 를 아직 재현하지 않고, 검색
-   * 키워드도 Grok→Komoran(EXTRACT_KEYWORDS)로 바뀐다. 켜질 때마다 한 줄 WARN 으로 남긴다. 갭은 ⑦에서 닫는다.
+   * <p><b>레거시 대비 동등성(2026-06 갭 닫음):</b> 점수 가드(avg&lt;0.2 || max&lt;0.21 무관 결과 차단)는
+   * {@code SearchExecutor} 가, SEARCH_EXECUTED/BLOCKED·DECISION_KEEP/SKIP analytics 는 {@code emitSearchAnalytics}/
+   * {@code emitDecisionAnalytics} 가 재현한다(레거시 {@code handleSearchDecision} 과 payload 동등).
+   *
+   * <p><b>⚠ 남은 의도된 차이:</b> 검색 키워드가 Grok(레거시)→Komoran(EXTRACT_KEYWORDS, live)로 바뀐다 —
+   * 같은 입력에 검색 결과가 갈릴 수 있다. shadow 경로가 ref id 겹침({@code drawe.workflow.shadow})을 측정하므로,
+   * 한 의도라도 shadow outcome 이 {@code match} 가 아니면 그 의도는 live 로 켜지 않는다. 켜질 때마다 한 줄 WARN.
    */
   private ChatResponse chatViaWorkflow(
       User user,
@@ -270,11 +283,16 @@ public class ChatLlmService {
       IntentResult intent) {
 
     log.warn(
-        "⚙️ COMPOSE live 경로: code={} session={} — 레거시 점수가드·검색 analytics 미재현, 키워드 Grok→Komoran 전환됨(갭은 ⑦에서 닫음)",
+        "⚙️ COMPOSE live 경로: code={} session={} — 점수가드·검색/결정 analytics 재현됨, 남은 차이는 키워드 Grok→Komoran(shadow outcome 확인 후 켤 것)",
         intent.code().code(),
         session.getId());
 
     LlmProvider provider = resolveProvider(user);
+
+    // ① 단기메모리(Redis) 조회/복원 — KEEP 멀티턴 맥락유지의 진입점(SCRUM-88 배선).
+    //    cache miss 면 MySQL 직전 ASSISTANT references 로 복원. 직전 턴 레퍼런스를 ② 로 주입한다.
+    SessionData sessionData = sessionService.getOrRestore(user.getId(), project.getId(), session);
+    List<ReferenceImage> previousReferences = sessionData.previousReferences();
 
     StepContext initial =
         StepContext.startForCompose(
@@ -285,7 +303,7 @@ public class ChatLlmService {
             request.message(),
             intent,
             request.imageUrl(),
-            List.of(),
+            previousReferences, // ② List.of() → 직전 턴 레퍼런스 (KEEP 시 ComposeExecutor 가 재사용)
             history,
             image.bytes(),
             image.mimeType(),
@@ -325,7 +343,11 @@ public class ChatLlmService {
       // SEARCH analytics(SEARCH_EXECUTED/BLOCKED) — Executor 가 아니라 여기서 발사한다(갭 닫기).
       // SearchExecutor 가 점수가드 판정·통계를 finalCtx.searchStats() 로 실어 줬다. shadow 경로는 이 메서드를
       // 안 타므로 중복 발사되지 않는다. payload 는 레거시 handleSearchDecision 과 동등.
-      emitSearchAnalytics(user, session.getId(), finalCtx.searchStats());
+      emitSearchAnalytics(user, session.getId(), finalCtx.searchStats(), request.message());
+
+      // DECISION_KEEP / DECISION_SKIP — 레거시 handleSearchDecision 의 KEEP/SKIP case 가 발사하던 의사결정
+      // 텔레메트리. live 는 handleSearchDecision 을 안 타므로 여기서 재현한다(검색을 안 돈 의도에만 발사).
+      emitDecisionAnalytics(user, session.getId(), intent.code(), request.message());
 
       List<ChatResponse.ReferenceItem> refItems = toReferenceItems(refs);
 
@@ -338,6 +360,10 @@ public class ChatLlmService {
       }
       llmMessageRepository.save(assistantMsg);
       session.setLastActive(Instant.now());
+
+      // ④ 이번 턴 결과를 Redis 단기메모리에 저장 — 다음 턴 KEEP 이 ① 에서 lookup 한다.
+      //    이번 턴에 새 검색 결과가 있으면(NEW_SEARCH) 그걸로 갱신, 없으면(KEEP/SKIP) 직전 refs 를 유지한다.
+      persistSessionMemory(sessionData, intent, refs);
 
       int latencyMs = finalCtx.composeLatencyMs() == null ? 0 : finalCtx.composeLatencyMs();
       Map<String, Object> successPayload = new HashMap<>();
@@ -358,7 +384,7 @@ public class ChatLlmService {
           "guide",
           output.message(),
           signReferenceUrls(refItems),
-          intent.code() == IntentCode.NEW_SEARCH ? "NEW_SEARCH" : intent.code().code(),
+          referencesAction(intent.code()),
           offerGenerate,
           offerGenerate ? request.message() : null,
           null);
@@ -405,17 +431,82 @@ public class ChatLlmService {
   }
 
   /**
+   * live 응답의 {@code referencesAction} 문자열 — 레거시 {@code decision.action().name()} 과 동등한
+   * "NEW_SEARCH" | "KEEP" | "SKIP" 을 돌려준다(프론트가 이 문자열로 분기).
+   *
+   * <p>레거시는 4-Action enum 이름을 그대로 썼지만 live 는 {@link IntentCode}(코드 001~008)를 들고 있어,
+   * 그대로 {@code code()} 를 내보내면 KEEP→"006"·SKIP→"007"·미술의도→"001~004" 같은 숫자가 응답에 새어 나간다.
+   * 검색을 새로 돌리는 NEW_SEARCH 만 "NEW_SEARCH" 이고, 직전 레퍼런스를 유지하는 의도(KEEP 및 그 세분류
+   * 001~004)는 전부 "KEEP", SKIP 은 "SKIP" 으로 접어 레거시 의미론과 맞춘다.
+   */
+  /**
+   * DECISION_KEEP / DECISION_SKIP 발사 — 레거시 {@code handleSearchDecision} 의 {@code case KEEP/SKIP} 과 동등.
+   * payload 는 레거시와 같이 {@code message_length} 한 칸. NEW_SEARCH 는 SEARCH_EXECUTED/BLOCKED 로 이미
+   * 텔레메트리가 남으므로 여기선 발사하지 않는다(레거시도 KEEP/SKIP case 에서만 DECISION_* 를 쐈다).
+   */
+  private void emitDecisionAnalytics(User user, String sessionId, IntentCode code, String message) {
+    if (code == IntentCode.NEW_SEARCH) {
+      return;
+    }
+    Map<String, Object> payload = Map.of("message_length", message != null ? message.length() : 0);
+    if (code == IntentCode.SKIP) {
+      analyticsEventService.track(AnalyticsEventType.DECISION_SKIP, user, sessionId, payload);
+    } else {
+      // KEEP(006) 및 미술 의도 세분류(001~004) — 직전 유지 의도.
+      analyticsEventService.track(AnalyticsEventType.DECISION_KEEP, user, sessionId, payload);
+    }
+  }
+
+  private String referencesAction(IntentCode code) {
+    if (code == IntentCode.NEW_SEARCH) {
+      return "NEW_SEARCH";
+    }
+    if (code == IntentCode.SKIP) {
+      return "SKIP";
+    }
+    // KEEP(006) 및 미술 의도 세분류(001~004 — KEEP+artIntent) 는 모두 "직전 유지" 의미라 KEEP 으로 접는다.
+    return "KEEP";
+  }
+
+  /**
+   * ④ 단기메모리 저장 — 이번 턴 결과를 Redis 에 반영해 다음 턴 KEEP 의 {@code getOrRestore} 가 lookup 하게 한다.
+   *
+   * <p>분기 기준은 "이번 턴이 새 검색을 의도했는가"({@code NEW_SEARCH})이지 결과 유무가 아니다:
+   * <ul>
+   *   <li><b>NEW_SEARCH</b>: 이번 턴 결과({@code thisTurnRefs})로 references 를 <b>덮어쓴다</b> — 결과가 비어도
+   *       (점수가드 차단·검색 예외로 0건) 빈 리스트로 덮어 메모리를 비운다. 화면엔 references 0건이 나갔는데
+   *       메모리만 옛 refs 를 살려두면, 다음 KEEP 이 화면에 없던 레퍼런스를 부활시키는 UI-메모리 불일치가 난다.</li>
+   *   <li><b>KEEP/SKIP</b>: 이번 턴 검색 자체가 없었으므로 기존 {@code previousReferences} 를 그대로 유지하고
+   *       의도·시각만 갱신한다.</li>
+   * </ul>
+   * 저장 자체는 best-effort — {@code SessionService#save} 구현이 Redis I/O 장애를 삼키므로 응답을 깨지 않는다.
+   */
+  private void persistSessionMemory(
+      SessionData sessionData, IntentResult intent, List<ReferenceImage> thisTurnRefs) {
+    SessionData updated =
+        intent.code() == IntentCode.NEW_SEARCH
+            // NEW_SEARCH 는 결과 유무와 무관하게 이번 턴 결과로 덮어쓴다(0건이면 비움 = 화면과 일치).
+            ? sessionData.withSearchResult(intent.code(), List.of(), thisTurnRefs)
+            // KEEP/SKIP — 검색 안 함, 직전 references 유지.
+            : sessionData.withIntent(intent.code());
+    sessionService.save(updated);
+  }
+
+  /**
    * live 경로 SEARCH analytics 발사 — {@link SearchStats}(SearchExecutor 가 채움) 기준으로 SEARCH_EXECUTED 또는
    * SEARCH_BLOCKED 를 발사한다. payload 는 레거시 {@code handleSearchDecision} 과 동등(keyword·result_count·
    * avg/max/min·blocked·image_ids·scores). NEW_SEARCH 가 아니거나(=SEARCH step 없음) 키워드가 없어 검색을
    * 안 했으면 {@code searchStats} 가 null 이라 발사하지 않는다.
    */
-  private void emitSearchAnalytics(User user, String sessionId, SearchStats stats) {
+  private void emitSearchAnalytics(User user, String sessionId, SearchStats stats, String message) {
     if (stats == null) {
       return;
     }
     Map<String, Object> payload = new HashMap<>();
     payload.put("keyword", stats.keyword());
+    // message_length — 레거시 handleSearchDecision payload 에는 있으나 SearchStats 에 슬롯이 없어 누락됐던 필드.
+    // SearchExecutor 는 message 를 모르므로(키워드만 받음) 호출부에서 직접 채운다.
+    payload.put("message_length", message != null ? message.length() : 0);
     payload.put("result_count", stats.resultCount());
     payload.put("avg_score", stats.avgScore());
     payload.put("max_score", stats.maxScore());
@@ -425,6 +516,11 @@ public class ChatLlmService {
     payload.put("blocked", stats.blocked());
     if (stats.blocked()) {
       payload.put("blocked_reason", stats.blockedReason());
+      // 검색 예외 차단이면 error_class·error_code 도 함께 — 레거시 handleSearchDecision catch 와 동등.
+      if (stats.errorClass() != null) {
+        payload.put("error_class", stats.errorClass());
+        payload.put("error_code", "SEARCH_FAILED");
+      }
       analyticsEventService.track(AnalyticsEventType.SEARCH_BLOCKED, user, sessionId, payload);
     } else {
       analyticsEventService.track(AnalyticsEventType.SEARCH_EXECUTED, user, sessionId, payload);
@@ -960,26 +1056,6 @@ public class ChatLlmService {
         .filter(s -> s.provider() == provider)
         .findFirst()
         .orElseThrow(() -> new CustomException(ErrorCode.INVALID_INPUT));
-  }
-
-  private List<LlmCallContext.Turn> trimHistory(List<LlmMessage> all, int maxNonSystem) {
-    List<LlmCallContext.Turn> systems = new ArrayList<>();
-    List<LlmCallContext.Turn> rest = new ArrayList<>();
-    for (LlmMessage m : all) {
-      if (m.getStatus() == LlmCallStatus.FAILED) {
-        continue;
-      }
-      LlmCallContext.Turn turn = new LlmCallContext.Turn(m.getRole(), m.getContent());
-      if (m.getRole() == MessageRole.SYSTEM) {
-        systems.add(turn);
-      } else {
-        rest.add(turn);
-      }
-    }
-    int from = Math.max(0, rest.size() - maxNonSystem);
-    List<LlmCallContext.Turn> trimmed = new ArrayList<>(systems);
-    trimmed.addAll(rest.subList(from, rest.size()));
-    return trimmed;
   }
 
   private void persistFailure(LlmMessage assistantMsg, Exception e) {

@@ -20,10 +20,13 @@ import java.util.List;
  * @param avgScore      점수 평균 (결과 0 이면 0.0).
  * @param maxScore      점수 최대 (결과 0 이면 0.0).
  * @param minScore      점수 최소 (결과 0 이면 0.0).
- * @param blocked       점수 가드로 차단됐는지.
- * @param blockedReason 차단 사유 ({@code low_score}). 차단 아니면 null.
+ * @param blocked       점수 가드 또는 검색 예외로 차단됐는지.
+ * @param blockedReason 차단 사유 ({@code low_score} | {@code exception}). 차단 아니면 null.
  * @param imageIds      결과 image id 목록 (analytics·디버깅용).
  * @param scores        결과 점수 목록 (소수점 3자리 반올림).
+ * @param errorClass    검색 예외로 차단된 경우({@code blockedReason=exception}) 예외 클래스명. 그 외 null.
+ *                      레거시 {@code handleSearchDecision} 의 catch 가 SEARCH_BLOCKED payload 에 담던
+ *                      {@code error_class} 와 동등.
  */
 public record SearchStats(
     String keyword,
@@ -34,7 +37,8 @@ public record SearchStats(
     boolean blocked,
     String blockedReason,
     List<Long> imageIds,
-    List<Double> scores) {
+    List<Double> scores,
+    String errorClass) {
 
   public SearchStats {
     imageIds = imageIds == null ? List.of() : List.copyOf(imageIds);
