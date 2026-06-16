@@ -88,7 +88,13 @@ public class ComposeExecutor implements StepExecutor {
       return ctx;
     }
 
-    List<ReferenceImage> refs = ctx.references();
+    // KEEP 멀티턴 단기메모리: 이번 턴 검색이 없으면(references 비었음) 직전 턴의 레퍼런스를 재사용한다.
+    // IntentRouting 이 KEEP → [COMPOSE] 만 돌려 SearchExecutor 를 건너뛰면 ctx.references() 가 빈 리스트인데,
+    // 그대로 두면 "참고 이미지 없음" 안내가 나가 멀티턴 맥락이 끊긴다. chatViaWorkflow 가 Redis(getOrRestore)
+    // 로 실어 보낸 ctx.previousReferences() 를 여기서 LLM 컨텍스트·무결성 기준으로 동등하게 쓴다(SCRUM-88 배선).
+    // 단 이 refs 는 응답 노출용이 아니라 합성 컨텍스트용 — 응답 refItems 는 chatViaWorkflow 가 별도로 결정한다.
+    List<ReferenceImage> refs =
+        ctx.references().isEmpty() ? ctx.previousReferences() : ctx.references();
 
     // 1. references → referenceContext SYSTEM turn 으로 변환해 누적 history 끝에 붙인다(§3.2).
     //    references 가 비면 "참고 없음" 안내 turn 을 붙여 LLM 이 가짜 인용·가짜 결과를 만들지 않게 한다.
