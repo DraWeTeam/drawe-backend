@@ -107,4 +107,14 @@ class IntentResultAdapterTest {
     assertThat(adapter.adaptSelfCritique(List.of(2)).referencedImages()).containsExactly(2);
     assertThat(adapter.adaptSelfCritique(null).referencedImages()).isEmpty();
   }
+
+  @Test
+  @DisplayName("adaptOutOfDomain → 000, tier=RULE, hasUploadedImage=false")
+  void outOfDomain() {
+    IntentResult r = adapter.adaptOutOfDomain();
+    assertThat(r.code()).isEqualTo(IntentCode.OUT_OF_DOMAIN);
+    assertThat(r.tier()).isEqualTo(IntentResult.Tier.RULE);
+    assertThat(r.hasUploadedImage()).isFalse();
+    assertThat(r.referencedImages()).isEmpty();
+  }
 }

@@ -58,6 +58,15 @@ public class IntentResultAdapter {
   }
 
   /**
+   * 000 OUT_OF_DOMAIN 전용 산출 (S3' 트랙 A, 설계 §000 — adaptSelfCritique 와 동일한 방식 (나)).
+   * {@code ExtractionResult} 4 Action 에 도메인 외 의도가 없어 {@link #adapt} 로는 못 만든다. 호출 측이
+   * {@code RulePreRouter.isOutOfDomain} 으로 결정론적으로 확정한 뒤 호출하므로 tier 는 항상 {@code RULE}.
+   */
+  public IntentResult adaptOutOfDomain() {
+    return new IntentResult(IntentCode.OUT_OF_DOMAIN, List.of(), false, IntentResult.Tier.RULE);
+  }
+
+  /**
    * 4 Action → IntentCode. KEEP 은 미술 의도 세분류({@code artIntent})가 있으면 001~004, 없으면 006(미분류) 으로
    * 매핑한다 (②-2차). 룰이 결정한 KEEP 은 artIntent 가 없으니 자연히 006.
    */

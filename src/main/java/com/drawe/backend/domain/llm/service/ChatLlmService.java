@@ -105,6 +105,18 @@ public class ChatLlmService {
       return handleGenerateNow(user, project, session, request, decision);
     }
 
+    // 000 OUT_OF_DOMAIN (S3' 트랙 A): 명백한 비미술 도메인 외 질문 → 거절 톤 경로.
+    // 010 과 동일하게 게이트(isLive(000))를 분류 앞에 둬 off 면 완전 무영향(레거시 페르소나 거절로 흘림).
+    // 룰이 매우 보수적이라 미술 맥락이 조금이라도 있으면 발화 안 함(오탐 회피). 도메인이탈 빈도를 메트릭으로 관측.
+    if (rulePreRouter.isOutOfDomain(request.message())
+        && workflowComposeProperties.isLive(IntentCode.OUT_OF_DOMAIN)) {
+      IntentResult ood = intentResultAdapter.adaptOutOfDomain();
+      llmMetrics.ruleHit("out_of_domain", IntentCode.OUT_OF_DOMAIN.code());
+      List<LlmCallContext.Turn> rejectHistory = new ArrayList<>(history);
+      rejectHistory.add(new LlmCallContext.Turn(MessageRole.SYSTEM, OUT_OF_DOMAIN_GUIDE));
+      return chatViaWorkflow(user, project, session, request, image, rejectHistory, ood);
+    }
+
     // 010 SELF_CRITIQUE (S3' 트랙 A): 업로드 이미지 + 비평 요청 신호 → 멀티모달 비평 경로.
     // 게이트(isLive(010))를 분류 앞에 둔다 — off 면 010 IntentResult 자체를 만들지 않고 아래 기존 경로로
     // 흘러, 010 이 레거시에 도달하지 않는다(설계 §6 = 완전 무영향). 010 은 live 워크플로에서만 동작한다.
@@ -401,6 +413,7 @@ public class ChatLlmService {
     return switch (code) {
       case NEW_SEARCH -> "NEW_SEARCH";
       case SELF_CRITIQUE -> "SELF_CRITIQUE";
+      case OUT_OF_DOMAIN -> "OUT_OF_DOMAIN";
       case SKIP -> "SKIP";
       default -> "KEEP"; // KEEP(006) + 미술의도 001~004 등
     };
@@ -951,6 +964,25 @@ public class ChatLlmService {
   private boolean notBlank(String s) {
     return s != null && !s.isBlank();
   }
+
+  /**
+   * 000 OUT_OF_DOMAIN 거절 톤 가이드 (S3' 트랙 A). 페르소나 v2 도메인 락이 이미 거절을 하지만, 룰이 000 으로
+   * 단정한 경우 COMPOSE 가 확실히 "부드럽게 거절 + 그림으로 복귀" 톤을 내도록 SYSTEM turn 으로 한 번 더 못박는다.
+   * references 없는 거절이라 [N] 인용 금지(무결성 체커가 범위밖 인용을 차단).
+   */
+  private static final String OUT_OF_DOMAIN_GUIDE =
+      "[도메인 외 질문 안내]\n"
+          + "이번 발화는 그림·드로잉과 무관한 주제(날씨·뉴스·코딩·요리 등)로 보입니다.\n"
+          + "\n"
+          + "응답 가이드:\n"
+          + "- 딱딱하게 자르지 말고 친구처럼 가볍게 거절한 뒤, 곧바로 그림 쪽으로 자연스럽게 데려오세요.\n"
+          + "- 예: \"아 그건 제가 잘 몰라요 ㅎㅎ 대신 지금 그리는 거 같이 봐드릴까요?\"\n"
+          + "- 매번 똑같은 문장 반복 금지. 상황·어조에 맞게 한 톤 가볍게.\n"
+          + "\n"
+          + "금지:\n"
+          + "- 도메인 외 주제에 실제로 답하기(날씨 알려주기, 코드 짜주기 등).\n"
+          + "- [1], [2] 같은 인용 표현 (참고 이미지 없음).\n"
+          + "- 길게 훈계하거나 매뉴얼처럼 말하기.";
 
   // 한글/영문 변형까지 묶어 한 번에 잡는다. 너무 좁으면 누락, 너무 넓으면 일반 대화에서 오탐.
   // 핵심 키워드: "생성" + "버튼", 또는 "만들어드릴" / "만들어 드릴" / "생성해드릴", "AI 이미지" + 동작어.

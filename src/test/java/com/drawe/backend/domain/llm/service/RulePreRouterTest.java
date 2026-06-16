@@ -128,4 +128,38 @@ class RulePreRouterTest {
   void critiqueRequestFalse(String message) {
     assertThat(router.isCritiqueRequest(message)).isFalse();
   }
+
+  // ── 000 OUT_OF_DOMAIN: 명백한 비미술 도메인 ─────────────
+  @ParameterizedTest
+  @ValueSource(
+      strings = {
+        "오늘 날씨 어때?",
+        "비트코인 시세 알려줘",
+        "파이썬으로 정렬 코드 짜줘",
+        "근처 맛집 추천해줘",
+        "어제 축구 경기 결과 알려줘",
+        "이 영어 문장 번역해줘",
+        "두통에 먹는 약 추천"
+      })
+  @DisplayName("명백한 비미술 도메인 → isOutOfDomain=true")
+  void outOfDomainTrue(String message) {
+    assertThat(router.isOutOfDomain(message)).isTrue();
+  }
+
+  @ParameterizedTest
+  @ValueSource(
+      strings = {
+        "벚꽃 풍경 그려줘", // 미술
+        "수채화 기법 알려줘", // 미술
+        "노을 색 그리려는데 날씨를 어떻게 표현해?", // 날씨 신호 있지만 그림 맥락 → 거절 X
+        "이 그림 색감 어때?", // 미술
+        "안녕하세요", // 인사(비미술이나 거절 대상 아님)
+        "더 자세히 알려줘",
+        "",
+        "   "
+      })
+  @DisplayName("미술 맥락이 있거나 약한 신호 → isOutOfDomain=false (오탐 회피)")
+  void outOfDomainFalse(String message) {
+    assertThat(router.isOutOfDomain(message)).isFalse();
+  }
 }
