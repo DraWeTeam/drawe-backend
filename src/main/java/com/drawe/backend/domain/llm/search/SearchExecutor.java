@@ -69,7 +69,24 @@ public class SearchExecutor implements StepExecutor {
 
         // 기존 SearchService 호출
         SearchRequest req = buildRequest(keywords);
-        SearchResponse resp = searchService.search(req);
+        SearchResponse resp;
+        try {
+            resp = searchService.search(req);
+        } catch (Exception e) {
+            // 레거시 handleSearchDecision 의 catch(Exception) 와 동등 — 검색 예외를 삼키고 빈 references 로
+            // 응답을 이어가되, blocked_reason=exception 으로 SearchStats 에 실어 chatViaWorkflow 가
+            // SEARCH_BLOCKED 를 발사하게 한다. (예외를 그대로 던지면 WorkflowService.runStep 이 RuntimeException 만
+            // 잡아 checked 는 새고, searchStats 도 안 실려 analytics 가 누락된다. Exception 으로 넓혀 둘 다 막는다.)
+            log.error(
+                    "SEARCH 실패 — 빈 references 로 진행: keywords_length={}, error_class={}",
+                    req.query() != null ? req.query().length() : 0,
+                    e.getClass().getSimpleName());
+            SearchStats errStats =
+                    new SearchStats(
+                            req.query(), 0, 0.0, 0.0, 0.0, true, "exception",
+                            List.of(), List.of(), e.getClass().getSimpleName());
+            return ctx.withReferences(List.of()).withSearchStats(errStats);
+        }
         List<ImageResult> results = resp.results();
 
         // 점수 통계 (레거시 handleSearchDecision 이관). 결과 0 이면 0.0.
@@ -85,7 +102,10 @@ public class SearchExecutor implements StepExecutor {
         // 비움). avg 가 낮아도 max 가 0.24 이상이면 최상위 레퍼런스는 관련 있다고 보고 살린다(rescue, 베타 튜닝).
         // analytics(SEARCH_EXECUTED/BLOCKED) 발사는 Executor 가 아니라 chatViaWorkflow 가 searchStats 보고 한다
         // (Executor 순수성 유지 + shadow 중복 방지).
-        boolean blocked = !results.isEmpty() && (avg < AVG_SCORE_FLOOR && max < MAX_SCORE_FLOOR);
+        //
+        // 결과 0건도 차단으로 본다(avg=max=0.0 → 0<0.2 && 0<0.24 충족) — 레거시 handleSearchDecision 과 동등.
+        // 과거엔 !results.isEmpty() 가드가 있어 0건이 EXECUTED 로 새어 레거시(BLOCKED low_score)와 어긋났다(b61c6cf 에서 제거).
+        boolean blocked = avg < AVG_SCORE_FLOOR && max < MAX_SCORE_FLOOR;
 
         SearchStats stats =
                 new SearchStats(
@@ -97,7 +117,8 @@ public class SearchExecutor implements StepExecutor {
                         blocked,
                         blocked ? "low_score" : null,
                         imageIds,
-                        scores);
+                        scores,
+                        null);
 
         if (blocked) {
             log.info(

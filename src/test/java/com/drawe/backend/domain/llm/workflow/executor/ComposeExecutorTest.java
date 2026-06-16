@@ -196,6 +196,75 @@ class ComposeExecutorTest {
   }
 
   @Nested
+  @DisplayName("KEEP 멀티턴 — previousReferences 재사용")
+  class KeepMultiTurn {
+
+    /** references 는 비우고 previousReferences 만 채운 ctx (KEEP 턴 — SearchExecutor 미실행 상태). */
+    private StepContext keepCtx(List<ReferenceImage> prev) {
+      StepContext base =
+          StepContext.startForCompose(
+              1L, 2L, "s1", "아까 그거 더 보여줘", "아까 그거 더 보여줘",
+              IntentResult.of(null, IntentResult.Tier.RULE),
+              null, prev, List.of(), null, null, LlmProvider.GROK);
+      // references 는 명시적으로 비운 채(=이번 턴 검색 없음) 둔다.
+      return base;
+    }
+
+    @Test
+    @DisplayName("references 비고 previousReferences 있으면 [참고 이미지] turn 으로 직전 refs 재사용")
+    void reusesPreviousReferences() {
+      AtomicReference<LlmCallContext> captured = new AtomicReference<>();
+      LlmService llm =
+          fakeLlm(
+              LlmProvider.GROK,
+              "{\"message\":\"[1]번처럼 이어서 그려보세요\",\"citations\":[1],\"offer_generate\":false}",
+              captured);
+
+      StepContext result = executor(llm).execute(keepCtx(refs(2)));
+
+      // "참고 없음" 안내가 아니라 직전 레퍼런스가 [참고 이미지] 컨텍스트로 실렸다.
+      assertThat(captured.get().history().get(0).content()).contains("[참고 이미지]");
+      assertThat(captured.get().history().get(0).content()).doesNotContain("참고 이미지가 없습니다");
+      // 직전 refs 기준 인용이라 [1] 이 환각으로 제거되지 않는다.
+      assertThat(result.composedOutput().citations()).containsExactly(1);
+      assertThat(result.composedOutput().message()).contains("[1]");
+    }
+
+    @Test
+    @DisplayName("references 도 previousReferences 도 비면 '참고 없음' 안내로 폴백")
+    void noRefsAtAllFallsBackToEmptyNotice() {
+      AtomicReference<LlmCallContext> captured = new AtomicReference<>();
+      LlmService llm =
+          fakeLlm(
+              LlmProvider.GROK,
+              "{\"message\":\"자료가 부족해요\",\"citations\":[],\"offer_generate\":true}",
+              captured);
+
+      executor(llm).execute(keepCtx(List.of()));
+
+      assertThat(captured.get().history().get(0).content()).contains("참고 이미지가 없습니다");
+    }
+
+    @Test
+    @DisplayName("이번 턴 references 가 있으면 previousReferences 보다 우선(NEW_SEARCH 우선)")
+    void thisTurnReferencesWin() {
+      AtomicReference<LlmCallContext> captured = new AtomicReference<>();
+      LlmService llm =
+          fakeLlm(
+              LlmProvider.GROK,
+              "{\"message\":\"[1] 좋아요\",\"citations\":[1],\"offer_generate\":false}",
+              captured);
+
+      // prev=2개, 이번턴=1개 → 이번턴이 이긴다. [1] 만 유효, [2] 는 환각으로 제거되어야 한다.
+      StepContext ctx = keepCtx(refs(2)).withReferences(refs(1));
+      executor(llm).execute(ctx);
+
+      // 이번 턴 refs(1개) 기준이므로 본문에 [2] 가 있었다면 제거됐을 것. citations 는 [1] 만 통과.
+      assertThat(captured.get().history().get(0).content()).contains("[1]");
+    }
+  }
+
+  @Nested
   @DisplayName("③ 무결성 검사 실연결")
   class Integrity {
 

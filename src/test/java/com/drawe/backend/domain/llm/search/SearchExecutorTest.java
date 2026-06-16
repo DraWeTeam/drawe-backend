@@ -237,6 +237,41 @@ class SearchExecutorTest {
     }
 
     @Test
+    @DisplayName("점수가드 — 검색 결과 0건도 차단(low_score) — 레거시 동등 (b61c6cf, AND 에서도 avg=max=0 차단)")
+    void scoreGuardBlocksEmptyResults() {
+        var searchService = mock(SearchService.class);
+        when(searchService.search(any(SearchRequest.class)))
+                .thenReturn(new SearchResponse(List.of(), 0, "kw"));
+        var sut = new SearchExecutor(searchService);
+
+        StepContext result = sut.execute(newCtxWithKeywords(List.of("kw")));
+
+        // 결과 0건 → avg=max=0.0 → 0<0.2 && 0<0.24 충족 → blocked(low_score). 과거엔 EXECUTED 로 새던 케이스.
+        assertThat(result.references()).isEmpty();
+        assertThat(result.searchStats().blocked()).isTrue();
+        assertThat(result.searchStats().blockedReason()).isEqualTo("low_score");
+        assertThat(result.searchStats().resultCount()).isZero();
+    }
+
+    @Test
+    @DisplayName("검색 예외 — 삼키고 빈 references + searchStats.blocked=exception(error_class 운반)")
+    void searchExceptionBlocksWithExceptionReason() {
+        var searchService = mock(SearchService.class);
+        when(searchService.search(any(SearchRequest.class)))
+                .thenThrow(new IllegalStateException("pinecone down"));
+        var sut = new SearchExecutor(searchService);
+
+        StepContext result = sut.execute(newCtxWithKeywords(List.of("kw")));
+
+        // 예외를 던지지 않고(워크플로 중단 방지) 빈 references 로 진행 — 레거시 catch 와 동등.
+        assertThat(result.references()).isEmpty();
+        assertThat(result.searchStats()).isNotNull();
+        assertThat(result.searchStats().blocked()).isTrue();
+        assertThat(result.searchStats().blockedReason()).isEqualTo("exception");
+        assertThat(result.searchStats().errorClass()).isEqualTo("IllegalStateException");
+    }
+
+    @Test
     @DisplayName("execute() — utility·freeTags 도 tags 에 합산")
     void tagsIncludeUtilityAndFreeTags() {
         var searchService = mock(SearchService.class);
