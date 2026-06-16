@@ -105,6 +105,17 @@ public class ChatLlmService {
       return handleGenerateNow(user, project, session, request, decision);
     }
 
+    // 010 SELF_CRITIQUE (S3' 트랙 A): 업로드 이미지 + 비평 요청 신호 → 멀티모달 비평 경로.
+    // 게이트(isLive(010))를 분류 앞에 둔다 — off 면 010 IntentResult 자체를 만들지 않고 아래 기존 경로로
+    // 흘러, 010 이 레거시에 도달하지 않는다(설계 §6 = 완전 무영향). 010 은 live 워크플로에서만 동작한다.
+    if (image.hasImage()
+        && rulePreRouter.isCritiqueRequest(request.message())
+        && workflowComposeProperties.isLive(IntentCode.SELF_CRITIQUE)) {
+      IntentResult critique = intentResultAdapter.adaptSelfCritique(List.of());
+      llmMetrics.ruleHit("self_critique", IntentCode.SELF_CRITIQUE.code());
+      return chatViaWorkflow(user, project, session, request, image, history, critique);
+    }
+
     // ⑤ 메인경로 전환(shadow→live): 의도가 live 플래그에 켜져 있으면 레거시 직접 합성 대신
     // 전체 워크플로(WorkflowService)로 응답을 만든다. 기본은 전부 off 라 아래 레거시 경로가 그대로 돈다.
     IntentResult intent =

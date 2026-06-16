@@ -87,6 +87,17 @@ public class RulePreRouter {
   /** SKIP 룰의 단독성 임계: 이 길이를 넘으면 인사/감사 토큰이 있어도 문장으로 보고 룰을 발화하지 않는다. */
   private static final int SKIP_MAX_LENGTH = 10;
 
+  // ── 작업물 비평 요청 (010 SELF_CRITIQUE) ───────────────
+  // "이거 어때?", "평가해줘", "피드백 주세요", "봐줄래?", "고칠 점 있어?", "잘 그렸어?" 류.
+  // 이미지 유무는 여기서 모른다 — 호출 측(ChatLlmService)이 hasImage 와 AND 로 결합해 010 을 확정한다.
+  // 즉 이 신호 단독으로는 010 이 아니다(이미지 없이 "어때?"는 일반 대화일 수 있음). 설계 §2.2.
+  private static final Pattern CRITIQUE_REQUEST =
+      Pattern.compile(
+          "어때|어떄|어떤\\s*것?\\s*같|평가|피드백|봐\\s*줄?|봐\\s*주|고칠\\s*점|고칠\\s*부분"
+              + "|잘\\s*(그렸|됐|했)|괜찮(아|나|은가|을까)|어떻게\\s*보(여|이)"
+              + "|critique|feedback|review|how('?s|\\s+is)\\s+(this|it|my)",
+          Pattern.CASE_INSENSITIVE);
+
   /**
    * 메시지를 룰로 분류한다. {@code history} 는 1차 룰에서는 쓰지 않지만(앵커/NEW_SEARCH 2차용) 시그니처는 유지한다.
    *
@@ -121,5 +132,19 @@ public class RulePreRouter {
 
     // 그 외 전부 MISS → 기존 Grok 풀 분류 (NEW_SEARCH/KEEP/앵커/미술의도 등).
     return Decision.miss();
+  }
+
+  /**
+   * 메시지가 "작업물 비평 요청" 신호를 담고 있는지 (010 SELF_CRITIQUE 후보). 결정론적·LLM 콜 0.
+   *
+   * <p><b>이것만으로는 010 이 아니다.</b> 이미지 없이 "어때?"는 일반 대화일 수 있으므로, 호출 측이
+   * {@code hasUploadedImage && isCritiqueRequest(message)} 로 결합해야 010 을 확정한다(설계 §2.2). 신호가
+   * 약하면 false → 기존 분류 경로로 흘려보낸다(회귀 없음).
+   */
+  public boolean isCritiqueRequest(String userMessage) {
+    if (userMessage == null || userMessage.isBlank()) {
+      return false;
+    }
+    return CRITIQUE_REQUEST.matcher(userMessage).find();
   }
 }

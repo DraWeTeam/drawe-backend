@@ -37,8 +37,8 @@ public class LlmMetrics {
   /**
    * 룰 프리라우터가 의도를 결정(LLM 콜 0). coverage 분자.
    *
-   * @param ruleId 발화한 룰 id (유한: empty/generate_verb/thanks_greeting)
-   * @param action 매핑된 Action (NEW_SEARCH/KEEP/SKIP/GENERATE_NOW)
+   * @param ruleId 발화한 룰 id (유한: empty/generate_verb/thanks_greeting/self_critique)
+   * @param action 매핑된 Action/의도코드 (NEW_SEARCH/KEEP/SKIP/GENERATE_NOW, 또는 010 등 의도코드)
    */
   public void ruleHit(String ruleId, String action) {
     registry.counter(ROUTE, "outcome", "rule_hit").increment();

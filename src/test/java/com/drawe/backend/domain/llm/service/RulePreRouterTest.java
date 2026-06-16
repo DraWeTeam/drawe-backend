@@ -101,4 +101,31 @@ class RulePreRouterTest {
     assertThat(router.route("고마워", List.of()).ruleId()).isEqualTo("thanks_greeting");
     assertThat(router.route("벚꽃 풍경 그리고 싶어", List.of()).ruleId()).isEqualTo("miss");
   }
+
+  // ── 010 SELF_CRITIQUE: 비평 요청 신호 (이미지 유무는 호출 측이 AND 결합) ───────
+  @ParameterizedTest
+  @ValueSource(
+      strings = {
+        "이거 어때?",
+        "제 그림 평가해주세요",
+        "피드백 주세요",
+        "한번 봐줄래?",
+        "고칠 점 있을까요?",
+        "이거 잘 그렸어?",
+        "괜찮아 보여?",
+        "how's this?",
+        "review my drawing",
+        "feedback please"
+      })
+  @DisplayName("비평 요청 신호 → isCritiqueRequest=true (010 후보)")
+  void critiqueRequestTrue(String message) {
+    assertThat(router.isCritiqueRequest(message)).isTrue();
+  }
+
+  @ParameterizedTest
+  @ValueSource(strings = {"벚꽃 풍경 그려줘", "다른 레퍼런스 보여줘", "수채화 기법 알려줘", "안녕하세요", "", "   "})
+  @DisplayName("비평 신호 없는 일반 메시지 → isCritiqueRequest=false")
+  void critiqueRequestFalse(String message) {
+    assertThat(router.isCritiqueRequest(message)).isFalse();
+  }
 }

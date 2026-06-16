@@ -90,4 +90,21 @@ class IntentResultAdapterTest {
     assertThat(adapter.adapt(ExtractionResult.keep(IntentCode.COLOR), false, List.of(), false).tier())
         .isEqualTo(IntentResult.Tier.LLM_LIGHT);
   }
+
+  @Test
+  @DisplayName("adaptSelfCritique → 010, hasUploadedImage=true, tier=RULE")
+  void selfCritique() {
+    IntentResult r = adapter.adaptSelfCritique(List.of());
+    assertThat(r.code()).isEqualTo(IntentCode.SELF_CRITIQUE);
+    assertThat(r.hasUploadedImage()).isTrue();
+    assertThat(r.tier()).isEqualTo(IntentResult.Tier.RULE);
+    assertThat(r.referencedImages()).isEmpty();
+  }
+
+  @Test
+  @DisplayName("adaptSelfCritique 앵커 슬롯 전달 + null → 빈 리스트")
+  void selfCritiqueAnchor() {
+    assertThat(adapter.adaptSelfCritique(List.of(2)).referencedImages()).containsExactly(2);
+    assertThat(adapter.adaptSelfCritique(null).referencedImages()).isEmpty();
+  }
 }
