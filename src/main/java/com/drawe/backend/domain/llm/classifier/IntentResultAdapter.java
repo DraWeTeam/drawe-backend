@@ -76,6 +76,7 @@ public class IntentResultAdapter {
       case KEEP -> decision.artIntent() != null ? decision.artIntent() : IntentCode.KEEP; // 001~004 or 006
       case SKIP -> IntentCode.SKIP; // 007
       case GENERATE_NOW -> IntentCode.GENERATE; // 008
+      case FOLLOWUP -> IntentCode.FOLLOWUP; // 012
     };
   }
 }

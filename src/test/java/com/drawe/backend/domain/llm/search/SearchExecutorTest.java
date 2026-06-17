@@ -162,10 +162,10 @@ class SearchExecutorTest {
     }
 
     @Test
-    @DisplayName("점수가드 — avg<0.2 || max<0.21 이면 references 차단 + searchStats.blocked=low_score")
+    @DisplayName("점수가드 — avg<0.2 AND max<0.24 (둘 다 낮음) 이면 references 차단 + blocked=low_score")
     void scoreGuardBlocksLowScore() {
         var searchService = mock(SearchService.class);
-        // 점수 전부 낮음: avg≈0.1, max=0.12 → 차단
+        // avg≈0.11, max=0.12 → avg·max 둘 다 낮음 → 차단
         ImageResult r1 = newImageResult(1L, "u1", "A", 0.10f, "t", "s", "m");
         ImageResult r2 = newImageResult(2L, "u2", "B", 0.12f, "t", "s", "m");
         when(searchService.search(any(SearchRequest.class)))
@@ -198,6 +198,42 @@ class SearchExecutorTest {
         assertThat(result.references()).hasSize(1);
         assertThat(result.searchStats().blocked()).isFalse();
         assertThat(result.searchStats().blockedReason()).isNull();
+    }
+
+    @Test
+    @DisplayName("점수가드 rescue — avg<0.2 지만 max≥0.24 면 통과 (상위 1장 관련 있으면 살림, 베타 튜닝)")
+    void scoreGuardRescuesHighMaxLowAvg() {
+        var searchService = mock(SearchService.class);
+        // 베타 실케이스 모사(man in suit): max=0.255, 나머지 낮음 → avg=0.189(<0.2) 지만 max≥0.24 → 통과
+        ImageResult r1 = newImageResult(1L, "u1", "A", 0.255f, "t", "s", "m");
+        ImageResult r2 = newImageResult(2L, "u2", "B", 0.123f, "t", "s", "m");
+        when(searchService.search(any(SearchRequest.class)))
+                .thenReturn(new SearchResponse(List.of(r1, r2), 2, "kw"));
+        var sut = new SearchExecutor(searchService);
+
+        StepContext result = sut.execute(newCtxWithKeywords(List.of("kw")));
+
+        // avg≈0.189 < 0.2 이지만 max=0.255 ≥ 0.24 → AND 가드 불충족 → 통과
+        assertThat(result.references()).hasSize(2);
+        assertThat(result.searchStats().blocked()).isFalse();
+        assertThat(result.searchStats().blockedReason()).isNull();
+    }
+
+    @Test
+    @DisplayName("점수가드 — avg≥0.2 면 max 와 무관하게 통과 (AND 라 avg 조건만 깨져도 통과)")
+    void scoreGuardPassesWhenAvgHighEvenIfMaxLow() {
+        var searchService = mock(SearchService.class);
+        // avg=0.205(≥0.2), max=0.21(<0.24) → AND 불충족 → 통과
+        ImageResult r1 = newImageResult(1L, "u1", "A", 0.21f, "t", "s", "m");
+        ImageResult r2 = newImageResult(2L, "u2", "B", 0.20f, "t", "s", "m");
+        when(searchService.search(any(SearchRequest.class)))
+                .thenReturn(new SearchResponse(List.of(r1, r2), 2, "kw"));
+        var sut = new SearchExecutor(searchService);
+
+        StepContext result = sut.execute(newCtxWithKeywords(List.of("kw")));
+
+        assertThat(result.references()).hasSize(2);
+        assertThat(result.searchStats().blocked()).isFalse();
     }
 
     @Test

@@ -2,6 +2,7 @@ package com.drawe.backend.domain.llm.workflow.executor;
 
 import com.drawe.backend.domain.enums.LlmProvider;
 import com.drawe.backend.domain.enums.MessageRole;
+import com.drawe.backend.domain.llm.contract.IntentCode;
 import com.drawe.backend.domain.llm.contract.ReferenceImage;
 import com.drawe.backend.domain.llm.contract.StepContext;
 import com.drawe.backend.domain.llm.contract.StepExecutor;
@@ -92,8 +93,9 @@ public class ComposeExecutor implements StepExecutor {
 
     // 1. references → referenceContext SYSTEM turn 으로 변환해 누적 history 끝에 붙인다(§3.2).
     //    references 가 비면 "참고 없음" 안내 turn 을 붙여 LLM 이 가짜 인용·가짜 결과를 만들지 않게 한다.
+    IntentCode code = ctx.intent() == null ? null : ctx.intent().code();
     List<LlmCallContext.Turn> history = new ArrayList<>(ctx.history());
-    history.add(new LlmCallContext.Turn(MessageRole.SYSTEM, buildReferenceContext(refs)));
+    history.add(new LlmCallContext.Turn(MessageRole.SYSTEM, buildReferenceContext(refs, code)));
 
     // 2. 스키마 강제 LLM 호출 — COMPOSE 만 structured output(draw_guide_response)을 쓴다(②).
     LlmCallContext callContext =
@@ -182,8 +184,26 @@ public class ComposeExecutor implements StepExecutor {
    * references → SYSTEM turn 본문. {@link ReferenceImage} 기준으로 1-based 인덱스·점수·태그를 나열하고
    * 인용 규칙([N])과 가짜 결과 금지 가이드를 동봉한다. references 가 비면 "참고 없음" 안내로 대체한다.
    */
-  private String buildReferenceContext(List<ReferenceImage> references) {
+  private String buildReferenceContext(List<ReferenceImage> references, IntentCode code) {
     if (references.isEmpty()) {
+      // 012 FOLLOWUP — references 가 없는 건 "검색 실패"가 아니라 "검색을 안 한" 것이다. 직전 답변에 대한
+      // 부연·재설명·평가 요청이므로 'AI 생성 권유'(아래 기본 안내)를 주면 베타 오답이 그대로 재현된다
+      // (레거시 경로의 FOLLOWUP_GUIDE 와 동일 정신). 직전 답변을 이어서 풀어주는 톤으로 못박는다.
+      if (code == IntentCode.FOLLOWUP) {
+        return "[후속 질문 안내]\n"
+            + "이번 발화는 방금 당신(어시스턴트)이 한 답변에 대한 부연·재설명·평가 요청입니다.\n"
+            + "(예: \"더 설명\", \"말로 설명해\", \"어때?\", \"그 외는?\", \"왜 그렇게 해?\")\n"
+            + "\n"
+            + "응답 가이드:\n"
+            + "- 새 주제로 넘어가지 말고, 바로 직전 답변을 이어서 더 구체적으로 풀어주세요.\n"
+            + "- \"말로 설명\"·\"피드백해줘\"처럼 평가를 원하면, 회피하지 말고 솔직하고 구체적으로 답하세요.\n"
+            + "- 한두 문장으로 핵심을 더하거나, 직전에 말한 부분을 다른 말로 다시 설명해 주세요.\n"
+            + "\n"
+            + "금지:\n"
+            + "- \"자료가 부족한 것 같아요. AI 이미지로 생성해드릴까요?\" 류의 회피·생성 권유 (사용자는 '말'을 원함).\n"
+            + "- [1], [2] 같은 인용 표현 (참고 이미지 없음).\n"
+            + "- \"잠시만요\", \"어떤 부분이요?\"처럼 되묻기만 하고 답을 미루는 표현.";
+      }
       return "[참고 이미지 안내]\n"
           + "이번 답변에는 검색된 참고 이미지가 없습니다.\n"
           + "\n"

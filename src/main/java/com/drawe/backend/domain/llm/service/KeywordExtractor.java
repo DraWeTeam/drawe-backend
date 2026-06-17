@@ -22,7 +22,7 @@ public class KeywordExtractor {
           You are a search decision system for a drawing reference image search.
 
           Read the user's message AND recent conversation history.
-          Decide ONE of four actions:
+          Decide ONE of five actions:
 
           ## 1. NEW_SEARCH: <english keywords>
 
@@ -138,6 +138,29 @@ public class KeywordExtractor {
           Include subject, style, mood, lighting if implied by context.
           Use project/conversation context to make the prompt vivid.
 
+          ## 5. FOLLOWUP
+
+          User reacts to YOUR (the assistant's) most recent answer and wants you to
+          continue, expand, re-explain, or evaluate what you JUST said — NOT new images.
+          No search, no generation: pick up your previous answer and carry it forward.
+
+          Signals (almost always SHORT, and only make sense against the previous turn):
+          - "더 설명", "더 설명해줘", "자세히", "계속", "그래서?"  (asking you to expand your last answer)
+          - "말로 설명", "말로 해줘", "말을 하라고", "말좀해", "말!"  (user wants a WORDED answer, not an image)
+          - "어때?", "어떻게 생각해?", "이거 어색하지 않아?", "그 외는?", "피드백해줘"  (asking you to evaluate / give an opinion)
+          - "왜?", "왜 그래?", "다시 설명"  (asking you to justify / restate your last point)
+          - "가이드를 해라", "그럼 어떻게 해" following your own previous guidance
+
+          CRITICAL — FOLLOWUP vs the others (the previous turn decides):
+          - It refers to YOUR last answer, not to a reference image or a new subject.
+          - It does NOT ask for images ("보여줘"/"레퍼런스"/"더 줘" → NEW_SEARCH).
+          - It does NOT ask to make an image ("만들어줘"/"그려줘" → GENERATE_NOW).
+          - It is NOT a greeting/thanks/abstract-theory (those → SKIP).
+          - A bare "더" after images were shown → NEW_SEARCH; but "더 설명"/"더 말해" → FOLLOWUP.
+          When the user is clearly pressing you to TALK / EXPLAIN / JUDGE your own prior
+          message (often repeating or getting frustrated), choose FOLLOWUP — never fall
+          back to offering an AI image.
+
           ---
 
           Output format: EXACTLY one line, no quotes, no extra text.
@@ -145,6 +168,7 @@ public class KeywordExtractor {
           - KEEP: COMPOSITION     (KEEP with art-intent label; or bare "KEEP" if ambiguous)
           - SKIP
           - GENERATE_NOW: a cheerful golden retriever walking in soft sunlight, watercolor style
+          - FOLLOWUP
 
           ---
 
@@ -240,6 +264,48 @@ public class KeywordExtractor {
 
           User: "1번 어떻게 그려?"  ← guide question
           → KEEP
+
+          ## FOLLOWUP examples (react to YOUR previous answer; no images, no generation)
+
+          History (assistant gave anatomy guidance): "어깨에서 손목까지 각도를 조금 낮추고, 팔꿈치가 더 자연스럽게 접히게 해보는 건 어때요?"
+          User: "더 설명"
+          → FOLLOWUP
+
+          History (assistant just explained a fix in words)
+          User: "말로 설명"
+          → FOLLOWUP
+
+          History (assistant suggested a pose change)
+          User: "포즈가 다르잖아. 아니면 말로 설명해"
+          → FOLLOWUP
+
+          History (assistant evaluated the user's drawing)
+          User: "그 외는?"
+          → FOLLOWUP
+
+          History (user keeps asking for an opinion on their own drawing, assistant kept deflecting)
+          User: "아니 어떻냐고 어색하진 않냐고"
+          → FOLLOWUP
+
+          User: "말좀해"        ← pressing you to talk, not asking for images
+          → FOLLOWUP
+
+          User: "말을 하라고"     ← same
+          → FOLLOWUP
+
+          User: "피드백해줘"      ← asking your opinion on the current work
+          → FOLLOWUP
+
+          History (assistant gave guidance)
+          User: "왜 그렇게 해?"   ← asking you to justify your last point
+          → FOLLOWUP
+
+          Contrast (do NOT confuse with FOLLOWUP):
+          User: "더 보여줘"       → NEW_SEARCH (wants more images)
+          User: "다른 거 보여줘"   → NEW_SEARCH
+          User: "고마워"          → SKIP
+          User: "보색이 뭐야?"     → SKIP (abstract theory, not about your last answer)
+          User: "그렇게 만들어줘"   → GENERATE_NOW
         """;
 
   private final List<LlmService> llmServices;
@@ -312,6 +378,11 @@ public class KeywordExtractor {
     if ("KEEP".equalsIgnoreCase(output)) {
       log.debug("이전 references 유지 (KEEP, 미분류)");
       return ExtractionResult.keep();
+    }
+
+    if ("FOLLOWUP".equalsIgnoreCase(output)) {
+      log.debug("직전 답변 부연 (FOLLOWUP, 012)");
+      return ExtractionResult.followup();
     }
 
     if ("SKIP".equalsIgnoreCase(output)) {

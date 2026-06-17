@@ -48,9 +48,15 @@ public class SearchExecutor implements StepExecutor {
         return StepType.SEARCH;
     }
 
-    /** 점수 가드 임계 — 레거시 handleSearchDecision 과 동일. 무관 결과 차단. */
+    // 점수 가드 임계 — 레거시 handleSearchDecision 과 동일하게 유지(두 경로 일관).
+    // S3' 트랙 A, 베타 search_scores(49건) 튜닝(2026-06-17): 기존 OR(avg<0.2 || max<0.21)은 차단율 29%로
+    // 과했다. 통과군 avg 하한이 0.201로 floor 에 딱 붙어 빡셌고, "최상위 1장은 관련 있는데 평균에 발목 잡혀
+    // 통째 차단"되는 케이스(예 avg0.189/max0.255 — max 가 통과군 median 0.254 보다 높음)가 있었다.
+    // → rescue 로 전환: avg 가 낮아도 max 가 충분히 높으면(≥0.24) 살린다. AND 라 둘 다 낮아야만 차단.
+    // 효과(시뮬): 차단 14→12(29%→24%), "상위장 멀쩡" 케이스 구제. 리포트: docs/test-reports/
+    // beta-intent-frequency-and-score-tuning-2026-06-17.md §D.
     private static final double AVG_SCORE_FLOOR = 0.2;
-    private static final double MAX_SCORE_FLOOR = 0.21;
+    private static final double MAX_SCORE_FLOOR = 0.24;
 
     @Override
     public StepContext execute(StepContext ctx) {
@@ -75,10 +81,11 @@ public class SearchExecutor implements StepExecutor {
         List<Double> scores =
                 results.stream().map(r -> round3(r.score().doubleValue())).toList();
 
-        // 점수 가드 — avg<0.2 || max<0.21 이면 무관 결과로 보고 차단(references 비움).
+        // 점수 가드 — avg<0.2 AND max<0.24 이면(=평균도 낮고 최상위 1장도 별로) 무관 결과로 보고 차단(references
+        // 비움). avg 가 낮아도 max 가 0.24 이상이면 최상위 레퍼런스는 관련 있다고 보고 살린다(rescue, 베타 튜닝).
         // analytics(SEARCH_EXECUTED/BLOCKED) 발사는 Executor 가 아니라 chatViaWorkflow 가 searchStats 보고 한다
         // (Executor 순수성 유지 + shadow 중복 방지).
-        boolean blocked = !results.isEmpty() && (avg < AVG_SCORE_FLOOR || max < MAX_SCORE_FLOOR);
+        boolean blocked = !results.isEmpty() && (avg < AVG_SCORE_FLOOR && max < MAX_SCORE_FLOOR);
 
         SearchStats stats =
                 new SearchStats(
@@ -94,7 +101,7 @@ public class SearchExecutor implements StepExecutor {
 
         if (blocked) {
             log.info(
-                    "SEARCH 점수가드 차단: avg={} max={} (floor avg={}, max={}), count={}",
+                    "SEARCH 점수가드 차단: avg={} max={} (avg<{} AND max<{}), count={}",
                     String.format("%.3f", avg),
                     String.format("%.3f", max),
                     AVG_SCORE_FLOOR,

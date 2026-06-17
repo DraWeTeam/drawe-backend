@@ -166,6 +166,12 @@ public class ChatLlmService {
                   + "- 네가 만들지 않은 이미지를 만든 척하는 표현:\n"
                   + "  \"만들어왔어요\", \"만들어드렸어요\", \"준비해봤어요\", \"여기 이미지요\" 등.\n"
                   + "- \"잠시만요\", \"어떤 분위기·구도\"처럼 길게 되묻거나 약속을 늘이지 마세요."));
+    } else if (decision.action() == ExtractionResult.Action.FOLLOWUP) {
+      // 012 FOLLOWUP — 직전 ASSISTANT 답변에 대한 부연·후속 질문("더 설명"/"말로 설명"/"어때?").
+      // 검색·생성 모두 안 하고 직전 답변을 이어서 풀어준다. 베타에서 이 의도를 못 알아듣고
+      // "자료가 부족한 것 같아요. AI 이미지로 생성해드릴까요?"를 반복한 게 만족도 저하의 직접 원인 →
+      // 여기서 'AI 생성 권유'를 명시적으로 금지한다.
+      history.add(new LlmCallContext.Turn(MessageRole.SYSTEM, FOLLOWUP_GUIDE));
     } else {
       // SKIP/KEEP — 인사·감사·확인 같은 단독 표현이거나 이전 맥락 유지. 검색을 안 했으니
       // 'AI 생성 제안'·'참고 이미지 없음' 안내는 부적절하다. 사용자의 말에 자연스럽게 반응만 한다.
@@ -414,6 +420,7 @@ public class ChatLlmService {
       case NEW_SEARCH -> "NEW_SEARCH";
       case SELF_CRITIQUE -> "SELF_CRITIQUE";
       case OUT_OF_DOMAIN -> "OUT_OF_DOMAIN";
+      case FOLLOWUP -> "FOLLOWUP";
       case SKIP -> "SKIP";
       default -> "KEEP"; // KEEP(006) + 미술의도 001~004 등
     };
@@ -594,9 +601,12 @@ public class ChatLlmService {
                   .toList();
           searchPayload.put("scores", scores);
 
-          if (avgScore < 0.2 || maxScore < 0.21) {
+          // 점수 가드(베타 튜닝 2026-06-17, SearchExecutor 와 동일): avg<0.2 AND max<0.24 일 때만 차단.
+          // avg 가 낮아도 max≥0.24 면 최상위 레퍼런스는 관련 있다고 보고 살린다(rescue). 기존 OR(max<0.21)은
+          // 차단율 29%로 과했고 "상위장 멀쩡한데 평균에 발목" 케이스를 통째 버렸다. 근거: SearchExecutor 주석.
+          if (avgScore < 0.2 && maxScore < 0.24) {
             log.warn(
-                "❌ 무관 결과 판단: 검색 결과 차단 (avg={} < 0.2 || max={} < 0.21)",
+                "❌ 무관 결과 판단: 검색 결과 차단 (avg={} < 0.2 AND max={} < 0.24)",
                 String.format("%.3f", avgScore),
                 String.format("%.3f", maxScore));
             log.info("================================");
@@ -654,6 +664,16 @@ public class ChatLlmService {
         log.info("⏭️  SKIP — 검색 불필요 (session={})", sessionId);
         analyticsEventService.track(
             AnalyticsEventType.DECISION_SKIP,
+            user,
+            sessionId,
+            Map.of("message_length", messageLength));
+        return List.of();
+
+      case FOLLOWUP:
+        // 012 — 직전 답변 부연. 검색 없이 직전 답변을 이어 설명한다(references 비움). 빈도 관측용 analytics.
+        log.info("💬 FOLLOWUP — 직전 답변 부연 (session={})", sessionId);
+        analyticsEventService.track(
+            AnalyticsEventType.DECISION_FOLLOWUP,
             user,
             sessionId,
             Map.of("message_length", messageLength));
@@ -983,6 +1003,27 @@ public class ChatLlmService {
           + "- 도메인 외 주제에 실제로 답하기(날씨 알려주기, 코드 짜주기 등).\n"
           + "- [1], [2] 같은 인용 표현 (참고 이미지 없음).\n"
           + "- 길게 훈계하거나 매뉴얼처럼 말하기.";
+
+  /**
+   * 012 FOLLOWUP 가이드 (S3' 트랙 A). 사용자가 직전 ASSISTANT 답변을 이어 "더 설명/말로 설명/어때?"처럼
+   * 부연·재설명·평가를 요청한 경우다. 검색·생성을 안 하므로 references 가 없고, 직전 답변을 이어서 풀어주는 게
+   * 핵심. 베타에서 이 의도를 "자료 부족 → AI 생성 권유"로 오답한 게 만족도 저하의 직접 원인이라 그 톤을 명시 금지한다.
+   */
+  private static final String FOLLOWUP_GUIDE =
+      "[후속 질문 안내]\n"
+          + "이번 발화는 방금 당신(어시스턴트)이 한 답변에 대한 부연·재설명·평가 요청입니다.\n"
+          + "(예: \"더 설명\", \"말로 설명해\", \"어때?\", \"그 외는?\", \"왜 그렇게 해?\")\n"
+          + "\n"
+          + "응답 가이드:\n"
+          + "- 새 주제로 넘어가지 말고, 바로 직전 답변을 이어서 더 구체적으로 풀어주세요.\n"
+          + "- \"말로 설명\"·\"피드백해줘\"처럼 평가를 원하면, 회피하지 말고 작업물/맥락에 대해 솔직하고 구체적으로 답하세요.\n"
+          + "- 한두 문장으로 핵심을 더하거나, 직전에 말한 부분을 다른 말로 다시 설명해 주세요.\n"
+          + "\n"
+          + "금지:\n"
+          + "- \"자료가 부족한 것 같아요. AI 이미지로 생성해드릴까요?\" 류의 회피·생성 권유 (사용자는 '말'을 원함).\n"
+          + "- AI 이미지 생성 제안 (지금 맥락이 아님).\n"
+          + "- [1], [2] 같은 인용 표현 (참고 이미지 없음).\n"
+          + "- \"잠시만요\", \"어떤 부분이요?\"처럼 되묻기만 하고 답을 미루는 표현.";
 
   // 한글/영문 변형까지 묶어 한 번에 잡는다. 너무 좁으면 누락, 너무 넓으면 일반 대화에서 오탐.
   // 핵심 키워드: "생성" + "버튼", 또는 "만들어드릴" / "만들어 드릴" / "생성해드릴", "AI 이미지" + 동작어.

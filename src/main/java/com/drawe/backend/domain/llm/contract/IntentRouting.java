@@ -23,8 +23,9 @@ import java.util.Map;
  * }
  * }</pre>
  *
- * <p>011 LEARNING_PATH, 012 FOLLOWUP, 013 COMPARE 는 베타 후 실제 빈도가 확인되면 추가.
- * 그 전까지는 LLM 분류기가 가장 가까운 기존 코드로 매핑하도록 한다.
+ * <p>012 FOLLOWUP 은 베타 빈도 확인(USER 92건 중 29%, 1위) 후 추가됨 — COMPOSE 종착(검색·생성 없음).
+ * 011 LEARNING_PATH, 013 COMPARE 는 빈도가 낮아 아직 보류. 그 전까지는 LLM 분류기가 가장 가까운 기존
+ * 코드로 매핑하도록 한다.
  */
 public final class IntentRouting {
 
@@ -39,8 +40,11 @@ public final class IntentRouting {
           Map.entry(IntentCode.KEEP, List.of(COMPOSE)),
           Map.entry(IntentCode.SKIP, List.of(COMPOSE)),
           Map.entry(IntentCode.GENERATE, List.of(TRANSLATE, GENERATE_IMAGE)),
-          Map.entry(IntentCode.SELF_CRITIQUE, List.of(CRITIQUE_UPLOAD, COMPOSE))
-          // 011~013 은 베타 후 빈도 확인되면 추가
+          Map.entry(IntentCode.SELF_CRITIQUE, List.of(CRITIQUE_UPLOAD, COMPOSE)),
+          // 012 FOLLOWUP (S3' 트랙 A): 직전 답변 부연 — 검색·생성 없이 COMPOSE 만(KEEP/SKIP 과 동일 종착).
+          // 베타 빈도 1위(29%)로 도입 확정. 011/013 은 빈도 낮아 보류.
+          Map.entry(IntentCode.FOLLOWUP, List.of(COMPOSE))
+          // 011/013 은 베타 빈도 낮아 보류
           );
 
   private IntentRouting() {}

@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.drawe.backend.domain.enums.LlmProvider;
 import com.drawe.backend.domain.enums.MessageRole;
+import com.drawe.backend.domain.llm.contract.IntentCode;
 import com.drawe.backend.domain.llm.contract.IntentResult;
 import com.drawe.backend.domain.llm.contract.ReferenceImage;
 import com.drawe.backend.domain.llm.contract.StepContext;
@@ -69,10 +70,18 @@ class ComposeExecutorTest {
 
   private StepContext ctxWith(
       LlmProvider provider, List<ReferenceImage> references, List<LlmCallContext.Turn> history) {
+    return ctxWith(provider, references, history, null);
+  }
+
+  private StepContext ctxWith(
+      LlmProvider provider,
+      List<ReferenceImage> references,
+      List<LlmCallContext.Turn> history,
+      IntentCode code) {
     StepContext base =
         StepContext.startForCompose(
             1L, 2L, "s1", "벚꽃 그리고 싶어", "벚꽃 그리고 싶어",
-            IntentResult.of(null, IntentResult.Tier.RULE),
+            IntentResult.of(code, IntentResult.Tier.RULE),
             null, List.of(), history, null, null, provider);
     return base.withReferences(references);
   }
@@ -124,6 +133,27 @@ class ComposeExecutorTest {
 
       assertThat(captured.get().history().get(0).content()).contains("참고 이미지가 없습니다");
       assertThat(result.composedOutput().offerGenerate()).isTrue();
+    }
+
+    @Test
+    @DisplayName("references 없고 intent=FOLLOWUP 이면 'AI 생성 권유' 대신 '후속 질문 안내' turn (베타 오답 차단)")
+    void followupWithoutReferences() {
+      AtomicReference<LlmCallContext> captured = new AtomicReference<>();
+      LlmService llm =
+          fakeLlm(
+              LlmProvider.GROK,
+              "{\"message\":\"직전 답변을 이어 설명하면…\",\"citations\":[],\"offer_generate\":false}",
+              captured);
+      executor(llm)
+          .execute(ctxWith(LlmProvider.GROK, List.of(), List.of(), IntentCode.FOLLOWUP));
+
+      String guide = captured.get().history().get(0).content();
+      // FOLLOWUP 전용 '후속 질문 안내' 가이드가 적용됨 (기본 '참고 이미지 안내'가 아님)
+      assertThat(guide).contains("후속 질문 안내");
+      assertThat(guide).contains("직전 답변을 이어서");
+      assertThat(guide).doesNotContain("참고 이미지가 없습니다");
+      // AI 생성 권유 문구는 '금지' 항목으로만 등장 (LLM 에게 그 톤을 쓰지 말라고 지시)
+      assertThat(guide).contains("회피·생성 권유");
     }
 
     @Test

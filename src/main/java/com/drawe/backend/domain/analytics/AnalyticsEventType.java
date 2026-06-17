@@ -32,6 +32,9 @@ public final class AnalyticsEventType {
   /** 키워드 추출 결정: 검색 불필요. */
   public static final String DECISION_SKIP = "decision_skip";
 
+  /** 키워드 추출 결정: 직전 답변에 대한 부연·후속 질문 (012 FOLLOWUP). 검색 없이 직전 답변을 이어서 설명. */
+  public static final String DECISION_FOLLOWUP = "decision_followup";
+
   // ── 온보딩 ────────────────────────────────────────
   /** 온보딩 완료. payload: selected_count, saved_pref_count. */
   public static final String ONBOARDING_COMPLETED = "onboarding_completed";

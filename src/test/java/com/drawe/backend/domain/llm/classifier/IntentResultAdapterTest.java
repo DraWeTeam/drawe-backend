@@ -18,7 +18,7 @@ class IntentResultAdapterTest {
   private final IntentResultAdapter adapter = new IntentResultAdapter();
 
   @Test
-  @DisplayName("4 Action → IntentCode 매핑")
+  @DisplayName("5 Action → IntentCode 매핑")
   void actionToCode() {
     assertThat(adapter.adapt(ExtractionResult.newSearch("k"), true, List.of(), false).code())
         .isEqualTo(IntentCode.NEW_SEARCH);
@@ -28,6 +28,16 @@ class IntentResultAdapterTest {
         .isEqualTo(IntentCode.SKIP);
     assertThat(adapter.adapt(ExtractionResult.generateNow("p"), true, List.of(), false).code())
         .isEqualTo(IntentCode.GENERATE);
+    assertThat(adapter.adapt(ExtractionResult.followup(), false, List.of(), false).code())
+        .isEqualTo(IntentCode.FOLLOWUP);
+  }
+
+  @Test
+  @DisplayName("FOLLOWUP → 012, Grok 결정이면 tier=LLM_LIGHT (012 는 history 의존이라 룰로 안 잡힘)")
+  void followupToCode() {
+    IntentResult r = adapter.adapt(ExtractionResult.followup(), false, List.of(), false);
+    assertThat(r.code()).isEqualTo(IntentCode.FOLLOWUP);
+    assertThat(r.tier()).isEqualTo(IntentResult.Tier.LLM_LIGHT);
   }
 
   @Test
