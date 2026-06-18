@@ -172,6 +172,10 @@ public class ChatLlmService {
       // "자료가 부족한 것 같아요. AI 이미지로 생성해드릴까요?"를 반복한 게 만족도 저하의 직접 원인 →
       // 여기서 'AI 생성 권유'를 명시적으로 금지한다.
       history.add(new LlmCallContext.Turn(MessageRole.SYSTEM, FOLLOWUP_GUIDE));
+    } else if (decision.action() == ExtractionResult.Action.COMPARE) {
+      // 013 COMPARE — 이미 맥락에 있는 대상(앞서 보여준 레퍼런스·옵션) 비교 요청("1번이랑 2번 중 뭐가 나아?").
+      // FOLLOWUP 과 같은 정신: 검색·생성을 안 하고 이미 있는 것을 비교·대조해 설명한다. 'AI 생성 권유' 금지.
+      history.add(new LlmCallContext.Turn(MessageRole.SYSTEM, COMPARE_GUIDE));
     } else {
       // SKIP/KEEP — 인사·감사·확인 같은 단독 표현이거나 이전 맥락 유지. 검색을 안 했으니
       // 'AI 생성 제안'·'참고 이미지 없음' 안내는 부적절하다. 사용자의 말에 자연스럽게 반응만 한다.
@@ -421,6 +425,7 @@ public class ChatLlmService {
       case SELF_CRITIQUE -> "SELF_CRITIQUE";
       case OUT_OF_DOMAIN -> "OUT_OF_DOMAIN";
       case FOLLOWUP -> "FOLLOWUP";
+      case COMPARE -> "COMPARE";
       case SKIP -> "SKIP";
       default -> "KEEP"; // KEEP(006) + 미술의도 001~004 등
     };
@@ -674,6 +679,16 @@ public class ChatLlmService {
         log.info("💬 FOLLOWUP — 직전 답변 부연 (session={})", sessionId);
         analyticsEventService.track(
             AnalyticsEventType.DECISION_FOLLOWUP,
+            user,
+            sessionId,
+            Map.of("message_length", messageLength));
+        return List.of();
+
+      case COMPARE:
+        // 013 — 맥락 대상 비교. 검색·생성 없이 이미 있는 대상을 비교 설명한다(references 비움). 빈도 관측용 analytics.
+        log.info("🔍 COMPARE — 맥락 대상 비교 (session={})", sessionId);
+        analyticsEventService.track(
+            AnalyticsEventType.DECISION_COMPARE,
             user,
             sessionId,
             Map.of("message_length", messageLength));
@@ -1024,6 +1039,26 @@ public class ChatLlmService {
           + "- AI 이미지 생성 제안 (지금 맥락이 아님).\n"
           + "- [1], [2] 같은 인용 표현 (참고 이미지 없음).\n"
           + "- \"잠시만요\", \"어떤 부분이요?\"처럼 되묻기만 하고 답을 미루는 표현.";
+
+  /**
+   * 013 COMPARE 가이드 (S3' 트랙 A). 사용자가 이미 맥락에 나온 대상(앞서 보여준 레퍼런스·옵션)을 "1번이랑 2번 중
+   * 뭐가 나아?"처럼 비교·대조해달라고 한 경우다. FOLLOWUP 과 같은 정신 — 검색·생성을 안 하므로 references 가 없고,
+   * 이미 있는 대상을 비교 설명하는 게 핵심. 'AI 생성 권유' 오답을 명시 금지한다.
+   */
+  private static final String COMPARE_GUIDE =
+      "[비교 안내]\n"
+          + "이번 발화는 이미 대화에 나온 대상(앞서 보여준 참고 이미지·옵션·직전 답변에서 언급한 것들)을\n"
+          + "비교·대조해 달라는 요청입니다. (예: \"1번이랑 2번 중 뭐가 나아?\", \"둘 차이가 뭐야?\")\n"
+          + "\n"
+          + "응답 가이드:\n"
+          + "- 새로 검색하거나 만들지 말고, 이미 맥락에 있는 대상들을 짚어 차이점·장단점을 구체적으로 비교하세요.\n"
+          + "- 구도·명암·색감·기법 등 미술적 관점에서 각각의 특징과 어떤 상황에 어느 쪽이 나은지 설명하세요.\n"
+          + "- 한쪽으로 치우치지 말고, 사용자의 목적(예: 초보/분위기)을 고려해 균형 있게 판단을 더하세요.\n"
+          + "\n"
+          + "금지:\n"
+          + "- \"자료가 부족한 것 같아요. AI 이미지로 생성해드릴까요?\" 류의 회피·생성 권유 (사용자는 비교를 원함).\n"
+          + "- AI 이미지 생성 제안 (지금 맥락이 아님).\n"
+          + "- \"어떤 걸 비교할까요?\"처럼 되묻기만 하고 비교를 미루는 표현.";
 
   // 한글/영문 변형까지 묶어 한 번에 잡는다. 너무 좁으면 누락, 너무 넓으면 일반 대화에서 오탐.
   // 핵심 키워드: "생성" + "버튼", 또는 "만들어드릴" / "만들어 드릴" / "생성해드릴", "AI 이미지" + 동작어.

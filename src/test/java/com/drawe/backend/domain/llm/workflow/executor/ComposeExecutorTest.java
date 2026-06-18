@@ -157,6 +157,27 @@ class ComposeExecutorTest {
     }
 
     @Test
+    @DisplayName("references 없고 intent=COMPARE 이면 'AI 생성 권유' 대신 '비교 안내' turn (베타 오답 차단)")
+    void compareWithoutReferences() {
+      AtomicReference<LlmCallContext> captured = new AtomicReference<>();
+      LlmService llm =
+          fakeLlm(
+              LlmProvider.GROK,
+              "{\"message\":\"1번은 부드럽고 2번은 대비가 강해요…\",\"citations\":[],\"offer_generate\":false}",
+              captured);
+      executor(llm)
+          .execute(ctxWith(LlmProvider.GROK, List.of(), List.of(), IntentCode.COMPARE));
+
+      String guide = captured.get().history().get(0).content();
+      // COMPARE 전용 '비교 안내' 가이드가 적용됨 (기본 '참고 이미지 안내'가 아님)
+      assertThat(guide).contains("비교 안내");
+      assertThat(guide).contains("비교·대조");
+      assertThat(guide).doesNotContain("참고 이미지가 없습니다");
+      // AI 생성 권유 문구는 '금지' 항목으로만 등장
+      assertThat(guide).contains("회피·생성 권유");
+    }
+
+    @Test
     @DisplayName("기존 history 뒤에 referenceContext turn 이 append 된다")
     void appendsAfterExistingHistory() {
       AtomicReference<LlmCallContext> captured = new AtomicReference<>();

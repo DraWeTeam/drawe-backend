@@ -77,6 +77,7 @@ public class IntentResultAdapter {
       case SKIP -> IntentCode.SKIP; // 007
       case GENERATE_NOW -> IntentCode.GENERATE; // 008
       case FOLLOWUP -> IntentCode.FOLLOWUP; // 012
+      case COMPARE -> IntentCode.COMPARE; // 013
     };
   }
 }

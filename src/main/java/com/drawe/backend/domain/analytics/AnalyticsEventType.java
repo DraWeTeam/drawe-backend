@@ -35,6 +35,9 @@ public final class AnalyticsEventType {
   /** 키워드 추출 결정: 직전 답변에 대한 부연·후속 질문 (012 FOLLOWUP). 검색 없이 직전 답변을 이어서 설명. */
   public static final String DECISION_FOLLOWUP = "decision_followup";
 
+  /** 키워드 추출 결정: 이미 맥락에 있는 대상 비교 (013 COMPARE). 검색·생성 없이 비교·대조 설명. */
+  public static final String DECISION_COMPARE = "decision_compare";
+
   // ── 온보딩 ────────────────────────────────────────
   /** 온보딩 완료. payload: selected_count, saved_pref_count. */
   public static final String ONBOARDING_COMPLETED = "onboarding_completed";

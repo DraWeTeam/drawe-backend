@@ -161,6 +161,26 @@ public class KeywordExtractor {
           message (often repeating or getting frustrated), choose FOLLOWUP — never fall
           back to offering an AI image.
 
+          ## 6. COMPARE
+
+          User asks you to COMPARE / CONTRAST things that are ALREADY in the conversation —
+          two reference images that were shown ("[1]과 [2] 중 뭐가 더 나아?"), or options you
+          already described. No search, no generation: weigh what is already on the table and
+          explain the differences. The cousin of FOLLOWUP — both reuse existing context, but
+          COMPARE specifically asks "which / what is the difference between A and B".
+
+          Signals (a comparison between TWO-OR-MORE things already shown / mentioned):
+          - "[1]이랑 [2] 중 뭐가 더 나아?", "1번하고 2번 비교해줘", "둘 중 어느 게 좋아?"
+          - "이 둘 차이가 뭐야?", "뭐가 달라?", "어느 쪽이 더 나아?", "장단점 비교해줘"
+          - "A랑 B 중에 골라줘", "which is better", "compare these two", "what's the difference"
+
+          CRITICAL — COMPARE vs the others:
+          - It compares TWO-OR-MORE things ALREADY in context (refs/options you showed).
+          - "보색이 뭐야?"/"RGB와 CMYK 차이가 뭐야?" → abstract theory, not about shown items → SKIP.
+          - "다른 거 보여줘"/"비슷한 거 더 줘" → wants NEW images → NEW_SEARCH.
+          - If only ONE thing is referenced (e.g. "1번 어때?") → FOLLOWUP/KEEP, not COMPARE.
+          - Never offer an AI image: the user wants your judgment on existing items.
+
           ---
 
           Output format: EXACTLY one line, no quotes, no extra text.
@@ -169,6 +189,7 @@ public class KeywordExtractor {
           - SKIP
           - GENERATE_NOW: a cheerful golden retriever walking in soft sunlight, watercolor style
           - FOLLOWUP
+          - COMPARE
 
           ---
 
@@ -306,6 +327,29 @@ public class KeywordExtractor {
           User: "고마워"          → SKIP
           User: "보색이 뭐야?"     → SKIP (abstract theory, not about your last answer)
           User: "그렇게 만들어줘"   → GENERATE_NOW
+
+          ## COMPARE examples (weigh TWO-OR-MORE things already in context; no images, no generation)
+
+          History (3 references shown): "[1] 수채화 인물, [2] 잉크 강한 대비, [3] 정물화"
+          User: "1번이랑 2번 중 뭐가 더 나아?"
+          → COMPARE
+
+          History (two references shown earlier)
+          User: "둘 중에 어느 쪽이 초보한테 좋아?"
+          → COMPARE
+
+          History (assistant described two pose options)
+          User: "두 개 차이가 뭐야?"
+          → COMPARE
+
+          History (references [1] [2] shown)
+          User: "1번하고 2번 장단점 비교해줘"
+          → COMPARE
+
+          Contrast (do NOT confuse with COMPARE):
+          User: "1번 어때?"        → FOLLOWUP/KEEP (only one item, not a comparison)
+          User: "RGB와 CMYK 차이가 뭐야?" → SKIP (abstract theory, not shown items)
+          User: "다른 거랑 비교되게 더 보여줘" → NEW_SEARCH (wants new images)
         """;
 
   private final List<LlmService> llmServices;
@@ -383,6 +427,11 @@ public class KeywordExtractor {
     if ("FOLLOWUP".equalsIgnoreCase(output)) {
       log.debug("직전 답변 부연 (FOLLOWUP, 012)");
       return ExtractionResult.followup();
+    }
+
+    if ("COMPARE".equalsIgnoreCase(output)) {
+      log.debug("맥락 대상 비교 (COMPARE, 013)");
+      return ExtractionResult.compare();
     }
 
     if ("SKIP".equalsIgnoreCase(output)) {

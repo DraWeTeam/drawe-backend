@@ -23,7 +23,13 @@ public record ExtractionResult(Action action, String keywords, IntentCode artInt
      * 설명/재설명/평가해달라"는 요청이라 검색을 안 하고 직전 답변을 이어서 풀어준다. 베타에서 "더 설명"/"말로 설명"/
      * "어때?" 류가 KEEP/SKIP 으로 뭉개지며 'AI 생성 권유' 오답이 반복된 게 만족도 저하의 직접 원인이었다.
      */
-    FOLLOWUP
+    FOLLOWUP,
+    /**
+     * 이미 대화에 나온 대상(레퍼런스 [1] vs [2], 직전 답변에 언급한 것들)을 말로 비교해달라는 요청 (013 COMPARE).
+     * FOLLOWUP 의 사촌 — 검색·생성을 안 하고 이미 맥락에 있는 것을 비교·대조해 설명한다. NEW_SEARCH(새 이미지 요청)나
+     * GENERATE_NOW(생성)와 달리 새 자료를 만들지 않으므로 'AI 생성 권유'가 아니라 비교 설명으로 답해야 한다.
+     */
+    COMPARE
   }
 
   public static ExtractionResult newSearch(String keywords) {
@@ -50,6 +56,11 @@ public record ExtractionResult(Action action, String keywords, IntentCode artInt
   /** 직전 답변에 대한 부연·후속 질문 (012). 검색·생성 없이 직전 답변을 이어서 설명한다. keywords/artIntent 없음. */
   public static ExtractionResult followup() {
     return new ExtractionResult(Action.FOLLOWUP, null, null);
+  }
+
+  /** 이미 맥락에 있는 대상(레퍼런스 [1] vs [2] 등)을 비교 설명 (013). 검색·생성 없음. keywords/artIntent 없음. */
+  public static ExtractionResult compare() {
+    return new ExtractionResult(Action.COMPARE, null, null);
   }
 
   /** keywords 에는 생성에 쓸 영문 프롬프트(또는 시드 한국어)를 담는다. */
