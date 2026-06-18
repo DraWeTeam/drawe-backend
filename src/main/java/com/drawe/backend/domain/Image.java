@@ -9,6 +9,7 @@ import java.util.List;
 import lombok.Getter;
 import lombok.Setter;
 import org.hibernate.annotations.ColumnDefault;
+import org.hibernate.annotations.CreationTimestamp;
 import org.hibernate.annotations.JdbcTypeCode;
 import org.hibernate.annotations.OnDelete;
 import org.hibernate.annotations.OnDeleteAction;
@@ -80,4 +81,9 @@ public class Image {
   /** Pinecone 적재 완료 시각. NULL = 미적재 (실패했거나 아직 비동기 처리 전). */
   @Column(name = "indexed_at")
   private Instant indexedAt;
+
+  /** 생성 시각. 완성작 갤러리 최신순 정렬용. 기존 행(마이그레이션 V7 이전 적재)은 NULL. */
+  @CreationTimestamp
+  @Column(name = "created_at", updatable = false)
+  private Instant createdAt;
 }
