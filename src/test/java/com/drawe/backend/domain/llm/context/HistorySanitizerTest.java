@@ -72,8 +72,7 @@ class HistorySanitizerTest {
   @Test
   @DisplayName("SYSTEM 메시지는 [N] 마커 보존")
   void preservesSystemMessages() {
-    LlmCallContext.Turn system =
-        new LlmCallContext.Turn(MessageRole.SYSTEM, "[1] 참고 이미지 1번: 수채화");
+    LlmCallContext.Turn system = new LlmCallContext.Turn(MessageRole.SYSTEM, "[1] 참고 이미지 1번: 수채화");
     List<LlmCallContext.Turn> result = sanitizer.sanitize(List.of(system));
     assertThat(result).hasSize(1);
     assertThat(result.get(0).content()).contains("[1]");

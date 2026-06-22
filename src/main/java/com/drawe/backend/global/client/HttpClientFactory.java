@@ -16,6 +16,8 @@ public final class HttpClientFactory {
   private HttpClientFactory() {}
 
   /**
+   * 연결·읽기 타임아웃이 설정된 {@link RestClient} 를 생성한다.
+   *
    * @param connectTimeoutMs 커넥션 수립 타임아웃 (ms)
    * @param readTimeoutMs 응답 대기 타임아웃 (ms) — 개별 요청 기준
    */
