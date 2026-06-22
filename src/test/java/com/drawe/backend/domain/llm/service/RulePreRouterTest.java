@@ -101,4 +101,65 @@ class RulePreRouterTest {
     assertThat(router.route("고마워", List.of()).ruleId()).isEqualTo("thanks_greeting");
     assertThat(router.route("벚꽃 풍경 그리고 싶어", List.of()).ruleId()).isEqualTo("miss");
   }
+
+  // ── 010 SELF_CRITIQUE: 비평 요청 신호 (이미지 유무는 호출 측이 AND 결합) ───────
+  @ParameterizedTest
+  @ValueSource(
+      strings = {
+        "이거 어때?",
+        "제 그림 평가해주세요",
+        "피드백 주세요",
+        "한번 봐줄래?",
+        "고칠 점 있을까요?",
+        "이거 잘 그렸어?",
+        "괜찮아 보여?",
+        "how's this?",
+        "review my drawing",
+        "feedback please"
+      })
+  @DisplayName("비평 요청 신호 → isCritiqueRequest=true (010 후보)")
+  void critiqueRequestTrue(String message) {
+    assertThat(router.isCritiqueRequest(message)).isTrue();
+  }
+
+  @ParameterizedTest
+  @ValueSource(strings = {"벚꽃 풍경 그려줘", "다른 레퍼런스 보여줘", "수채화 기법 알려줘", "안녕하세요", "", "   "})
+  @DisplayName("비평 신호 없는 일반 메시지 → isCritiqueRequest=false")
+  void critiqueRequestFalse(String message) {
+    assertThat(router.isCritiqueRequest(message)).isFalse();
+  }
+
+  // ── 000 OUT_OF_DOMAIN: 명백한 비미술 도메인 ─────────────
+  @ParameterizedTest
+  @ValueSource(
+      strings = {
+        "오늘 날씨 어때?",
+        "비트코인 시세 알려줘",
+        "파이썬으로 정렬 코드 짜줘",
+        "근처 맛집 추천해줘",
+        "어제 축구 경기 결과 알려줘",
+        "이 영어 문장 번역해줘",
+        "두통에 먹는 약 추천"
+      })
+  @DisplayName("명백한 비미술 도메인 → isOutOfDomain=true")
+  void outOfDomainTrue(String message) {
+    assertThat(router.isOutOfDomain(message)).isTrue();
+  }
+
+  @ParameterizedTest
+  @ValueSource(
+      strings = {
+        "벚꽃 풍경 그려줘", // 미술
+        "수채화 기법 알려줘", // 미술
+        "노을 색 그리려는데 날씨를 어떻게 표현해?", // 날씨 신호 있지만 그림 맥락 → 거절 X
+        "이 그림 색감 어때?", // 미술
+        "안녕하세요", // 인사(비미술이나 거절 대상 아님)
+        "더 자세히 알려줘",
+        "",
+        "   "
+      })
+  @DisplayName("미술 맥락이 있거나 약한 신호 → isOutOfDomain=false (오탐 회피)")
+  void outOfDomainFalse(String message) {
+    assertThat(router.isOutOfDomain(message)).isFalse();
+  }
 }

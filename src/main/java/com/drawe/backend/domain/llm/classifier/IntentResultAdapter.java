@@ -42,6 +42,34 @@ public class IntentResultAdapter {
   }
 
   /**
+   * 010 SELF_CRITIQUE 전용 산출 (S3' 트랙 A ②, 설계 §3.2 방식 (나)). {@code ExtractionResult}(4 Action)에는 비평
+   * 의도가 없어 {@link #adapt} 로는 010 을 만들 수 없다. 그래서 레거시 4-Action 분류 타입을 건드리지 않고 (회귀면 0) 여기서 직접
+   * IntentResult 를 만든다. 010 은 live 워크플로에서만 도달하므로(레거시는 멀티모달 비평 미지원) 이 경로로 충분하다.
+   *
+   * <p>트리거는 호출 측({@code ChatLlmService})이 {@code hasUploadedImage &&
+   * RulePreRouter.isCritiqueRequest} 로 결정론적으로 확정한 뒤 호출한다 — 그래서 tier 는 항상 {@link
+   * IntentResult.Tier#RULE} 다.
+   *
+   * @param referencedImages 앵커 슬롯. 비평엔 보통 없으나 시그니처 일관성 위해 받는다(null → 빈 리스트).
+   */
+  public IntentResult adaptSelfCritique(List<Integer> referencedImages) {
+    return new IntentResult(
+        IntentCode.SELF_CRITIQUE,
+        referencedImages == null ? List.of() : referencedImages,
+        true, // 010 은 정의상 업로드 이미지가 있을 때만 확정됨
+        IntentResult.Tier.RULE);
+  }
+
+  /**
+   * 000 OUT_OF_DOMAIN 전용 산출 (S3' 트랙 A, 설계 §000 — adaptSelfCritique 와 동일한 방식 (나)). {@code
+   * ExtractionResult} 4 Action 에 도메인 외 의도가 없어 {@link #adapt} 로는 못 만든다. 호출 측이 {@code
+   * RulePreRouter.isOutOfDomain} 으로 결정론적으로 확정한 뒤 호출하므로 tier 는 항상 {@code RULE}.
+   */
+  public IntentResult adaptOutOfDomain() {
+    return new IntentResult(IntentCode.OUT_OF_DOMAIN, List.of(), false, IntentResult.Tier.RULE);
+  }
+
+  /**
    * 4 Action → IntentCode. KEEP 은 미술 의도 세분류({@code artIntent})가 있으면 001~004, 없으면 006(미분류) 으로 매핑한다
    * (②-2차). 룰이 결정한 KEEP 은 artIntent 가 없으니 자연히 006.
    */
@@ -52,6 +80,8 @@ public class IntentResultAdapter {
           decision.artIntent() != null ? decision.artIntent() : IntentCode.KEEP; // 001~004 or 006
       case SKIP -> IntentCode.SKIP; // 007
       case GENERATE_NOW -> IntentCode.GENERATE; // 008
+      case FOLLOWUP -> IntentCode.FOLLOWUP; // 012
+      case COMPARE -> IntentCode.COMPARE; // 013
     };
   }
 }

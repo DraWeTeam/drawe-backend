@@ -14,7 +14,6 @@ import com.drawe.backend.domain.enums.UserPlan;
 import com.drawe.backend.domain.image.service.ImageGenerationService;
 import com.drawe.backend.domain.image.service.ImageUrlSigner;
 import com.drawe.backend.domain.llm.classifier.IntentResultAdapter;
-import com.drawe.backend.domain.llm.context.TokenAwareHistoryTrimmer;
 import com.drawe.backend.domain.llm.contract.IntentCode;
 import com.drawe.backend.domain.llm.contract.IntentResult;
 import com.drawe.backend.domain.llm.contract.ReferenceImage;
@@ -35,12 +34,14 @@ import com.drawe.backend.domain.search.dto.ImageResult;
 import com.drawe.backend.domain.search.dto.SearchRequest;
 import com.drawe.backend.domain.search.dto.SearchResponse;
 import com.drawe.backend.domain.search.service.SearchService;
+import com.drawe.backend.global.config.LlmProperties;
 import com.drawe.backend.global.config.WorkflowComposeProperties;
 import com.drawe.backend.global.error.CustomException;
 import com.drawe.backend.global.error.ErrorCode;
 import io.micrometer.core.instrument.MeterRegistry;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -61,6 +62,7 @@ public class ChatLlmService {
   private final ProjectRepository projectRepository;
   private final LlmMessageRepository llmMessageRepository;
   private final PersonaRegistry personaRegistry;
+  private final LlmProperties llmProperties;
   private final ImageInputResolver imageInputResolver;
   private final List<LlmService> llmServices;
 
@@ -78,7 +80,6 @@ public class ChatLlmService {
   private final ImageUrlSigner imageUrlSigner;
   private final WorkflowComposeProperties workflowComposeProperties;
   private final SessionService sessionService;
-  private final TokenAwareHistoryTrimmer tokenAwareHistoryTrimmer;
 
   @Transactional
   public ChatResponse chat(User user, Long projectId, ChatRequest request) {
@@ -94,14 +95,7 @@ public class ChatLlmService {
     ImageInputResolver.Resolved image = imageInputResolver.resolve(user, request.imageUrl());
 
     List<LlmMessage> all = llmMessageRepository.findByChatSessionOrderByCreatedAtAsc(session);
-    // Phase6 Layer1~4: 토큰 예산 기반 history 구성 (SYSTEM systemBudget + [N] sanitize + topic-aware trim).
-    // 기존 개수 기반 trimHistory 를 대체. 분기 전 공통부라 레거시·live 경로 둘 다 적용된다.
-    List<LlmCallContext.Turn> turns =
-        all.stream()
-            .filter(m -> m.getStatus() != LlmCallStatus.FAILED)
-            .map(m -> new LlmCallContext.Turn(m.getRole(), m.getContent()))
-            .toList();
-    List<LlmCallContext.Turn> history = tokenAwareHistoryTrimmer.trim(turns, request.message());
+    List<LlmCallContext.Turn> history = trimHistory(all, llmProperties.getMaxHistory());
 
     // 검색 결정: 결정론적 룰 프리라우터 먼저 → 미스면 Grok 풀 분류로 폴백.
     // 명확한 기능 신호(인사·감사·명시적 생성)는 LLM 콜 없이 룰로 끝낸다 (S1' 트랙 A).
@@ -112,6 +106,29 @@ public class ChatLlmService {
     // 바로 Bria 호출해서 응답에 생성된 이미지 url 을 담아 돌려준다.
     if (decision.action() == ExtractionResult.Action.GENERATE_NOW) {
       return handleGenerateNow(user, project, session, request, decision);
+    }
+
+    // 000 OUT_OF_DOMAIN (S3' 트랙 A): 명백한 비미술 도메인 외 질문 → 거절 톤 경로.
+    // 010 과 동일하게 게이트(isLive(000))를 분류 앞에 둬 off 면 완전 무영향(레거시 페르소나 거절로 흘림).
+    // 룰이 매우 보수적이라 미술 맥락이 조금이라도 있으면 발화 안 함(오탐 회피). 도메인이탈 빈도를 메트릭으로 관측.
+    if (rulePreRouter.isOutOfDomain(request.message())
+        && workflowComposeProperties.isLive(IntentCode.OUT_OF_DOMAIN)) {
+      IntentResult ood = intentResultAdapter.adaptOutOfDomain();
+      llmMetrics.ruleHit("out_of_domain", IntentCode.OUT_OF_DOMAIN.code());
+      List<LlmCallContext.Turn> rejectHistory = new ArrayList<>(history);
+      rejectHistory.add(new LlmCallContext.Turn(MessageRole.SYSTEM, OUT_OF_DOMAIN_GUIDE));
+      return chatViaWorkflow(user, project, session, request, image, rejectHistory, ood);
+    }
+
+    // 010 SELF_CRITIQUE (S3' 트랙 A): 업로드 이미지 + 비평 요청 신호 → 멀티모달 비평 경로.
+    // 게이트(isLive(010))를 분류 앞에 둔다 — off 면 010 IntentResult 자체를 만들지 않고 아래 기존 경로로
+    // 흘러, 010 이 레거시에 도달하지 않는다(설계 §6 = 완전 무영향). 010 은 live 워크플로에서만 동작한다.
+    if (image.hasImage()
+        && rulePreRouter.isCritiqueRequest(request.message())
+        && workflowComposeProperties.isLive(IntentCode.SELF_CRITIQUE)) {
+      IntentResult critique = intentResultAdapter.adaptSelfCritique(List.of());
+      llmMetrics.ruleHit("self_critique", IntentCode.SELF_CRITIQUE.code());
+      return chatViaWorkflow(user, project, session, request, image, history, critique);
     }
 
     // ⑤ 메인경로 전환(shadow→live): 의도가 live 플래그에 켜져 있으면 레거시 직접 합성 대신
@@ -152,6 +169,16 @@ public class ChatLlmService {
                   + "- 네가 만들지 않은 이미지를 만든 척하는 표현:\n"
                   + "  \"만들어왔어요\", \"만들어드렸어요\", \"준비해봤어요\", \"여기 이미지요\" 등.\n"
                   + "- \"잠시만요\", \"어떤 분위기·구도\"처럼 길게 되묻거나 약속을 늘이지 마세요."));
+    } else if (decision.action() == ExtractionResult.Action.FOLLOWUP) {
+      // 012 FOLLOWUP — 직전 ASSISTANT 답변에 대한 부연·후속 질문("더 설명"/"말로 설명"/"어때?").
+      // 검색·생성 모두 안 하고 직전 답변을 이어서 풀어준다. 베타에서 이 의도를 못 알아듣고
+      // "자료가 부족한 것 같아요. AI 이미지로 생성해드릴까요?"를 반복한 게 만족도 저하의 직접 원인 →
+      // 여기서 'AI 생성 권유'를 명시적으로 금지한다.
+      history.add(new LlmCallContext.Turn(MessageRole.SYSTEM, FOLLOWUP_GUIDE));
+    } else if (decision.action() == ExtractionResult.Action.COMPARE) {
+      // 013 COMPARE — 이미 맥락에 있는 대상(앞서 보여준 레퍼런스·옵션) 비교 요청("1번이랑 2번 중 뭐가 나아?").
+      // FOLLOWUP 과 같은 정신: 검색·생성을 안 하고 이미 있는 것을 비교·대조해 설명한다. 'AI 생성 권유' 금지.
+      history.add(new LlmCallContext.Turn(MessageRole.SYSTEM, COMPARE_GUIDE));
     } else {
       // SKIP/KEEP — 인사·감사·확인 같은 단독 표현이거나 이전 맥락 유지. 검색을 안 했으니
       // 'AI 생성 제안'·'참고 이미지 없음' 안내는 부적절하다. 사용자의 말에 자연스럽게 반응만 한다.
@@ -284,7 +311,8 @@ public class ChatLlmService {
       IntentResult intent) {
 
     log.warn(
-        "⚙️ COMPOSE live 경로: code={} session={} — 점수가드·검색/결정 analytics 재현됨, 남은 차이는 키워드 Grok→Komoran(shadow outcome 확인 후 켤 것)",
+        "⚙️ COMPOSE live 경로: code={} session={} — 점수가드·검색/결정 analytics 재현됨, "
+            + "남은 차이는 키워드 Grok→Komoran(shadow outcome 확인 후 켤 것)",
         intent.code().code(),
         session.getId());
 
@@ -409,6 +437,24 @@ public class ChatLlmService {
   }
 
   /**
+   * IntentCode → 프론트 노출용 referencesAction 문자열. <b>숫자 코드("006"/"010" 등)를 절대 노출하지 않는다</b> — 레거시
+   * chat() 은 {@code decision.action().name()}("NEW_SEARCH"/"KEEP"/"SKIP") 문자열을 줬고, 프론트 계약도 그 문자열
+   * 기준이다. NEW_SEARCH·SELF_CRITIQUE 는 고유 의미라 그대로, 그 외 COMPOSE 종착 의도(KEEP·SKIP·001~004 미술의도)는 "참고 유지"
+   * 의미로 처리한다.
+   */
+  private static String referencesAction(IntentCode code) {
+    return switch (code) {
+      case NEW_SEARCH -> "NEW_SEARCH";
+      case SELF_CRITIQUE -> "SELF_CRITIQUE";
+      case OUT_OF_DOMAIN -> "OUT_OF_DOMAIN";
+      case FOLLOWUP -> "FOLLOWUP";
+      case COMPARE -> "COMPARE";
+      case SKIP -> "SKIP";
+      default -> "KEEP"; // KEEP(006) + 미술의도 001~004 등
+    };
+  }
+
+  /**
    * live 경로 전용 어댑터 — {@link ReferenceImage}(contract) → {@link ChatResponse.ReferenceItem}.
    *
    * <p>{@code ReferenceImage} 에 복원된 표시 필드(photographerUsername·technique·subject·mood·source)를 그대로
@@ -433,15 +479,6 @@ public class ChatLlmService {
   }
 
   /**
-   * live 응답의 {@code referencesAction} 문자열 — 레거시 {@code decision.action().name()} 과 동등한 "NEW_SEARCH"
-   * | "KEEP" | "SKIP" 을 돌려준다(프론트가 이 문자열로 분기).
-   *
-   * <p>레거시는 4-Action enum 이름을 그대로 썼지만 live 는 {@link IntentCode}(코드 001~008)를 들고 있어, 그대로 {@code
-   * code()} 를 내보내면 KEEP→"006"·SKIP→"007"·미술의도→"001~004" 같은 숫자가 응답에 새어 나간다. 검색을 새로 돌리는 NEW_SEARCH 만
-   * "NEW_SEARCH" 이고, 직전 레퍼런스를 유지하는 의도(KEEP 및 그 세분류 001~004)는 전부 "KEEP", SKIP 은 "SKIP" 으로 접어 레거시
-   * 의미론과 맞춘다.
-   */
-  /**
    * DECISION_KEEP / DECISION_SKIP 발사 — 레거시 {@code handleSearchDecision} 의 {@code case KEEP/SKIP} 과
    * 동등. payload 는 레거시와 같이 {@code message_length} 한 칸. NEW_SEARCH 는 SEARCH_EXECUTED/BLOCKED 로 이미
    * 텔레메트리가 남으므로 여기선 발사하지 않는다(레거시도 KEEP/SKIP case 에서만 DECISION_* 를 쐈다).
@@ -451,23 +488,17 @@ public class ChatLlmService {
       return;
     }
     Map<String, Object> payload = Map.of("message_length", message != null ? message.length() : 0);
-    if (code == IntentCode.SKIP) {
-      analyticsEventService.track(AnalyticsEventType.DECISION_SKIP, user, sessionId, payload);
-    } else {
-      // KEEP(006) 및 미술 의도 세분류(001~004) — 직전 유지 의도.
-      analyticsEventService.track(AnalyticsEventType.DECISION_KEEP, user, sessionId, payload);
-    }
+    analyticsEventService.track(decisionEventType(code), user, sessionId, payload);
   }
 
-  private String referencesAction(IntentCode code) {
-    if (code == IntentCode.NEW_SEARCH) {
-      return "NEW_SEARCH";
-    }
-    if (code == IntentCode.SKIP) {
-      return "SKIP";
-    }
-    // KEEP(006) 및 미술 의도 세분류(001~004 — KEEP+artIntent) 는 모두 "직전 유지" 의미라 KEEP 으로 접는다.
-    return "KEEP";
+  /** 직전 유지 의도(KEEP·001~004)→DECISION_KEEP, SKIP/FOLLOWUP(012)/COMPARE(013)는 각자 이벤트로 접는다. */
+  private static String decisionEventType(IntentCode code) {
+    return switch (code) {
+      case SKIP -> AnalyticsEventType.DECISION_SKIP;
+      case FOLLOWUP -> AnalyticsEventType.DECISION_FOLLOWUP; // 012
+      case COMPARE -> AnalyticsEventType.DECISION_COMPARE; // 013
+      default -> AnalyticsEventType.DECISION_KEEP;
+    };
   }
 
   /**
@@ -530,12 +561,6 @@ public class ChatLlmService {
     }
   }
 
-  /**
-   * 의도 분류: 결정론적 룰 프리라우터를 먼저 시도하고, 미스면 Grok 풀 분류로 폴백한다.
-   *
-   * <p>룰 히트/미스를 analytics(DB) + Micrometer(실시간) 로 집계해 ADR §4 DoD(룰 적중률 ≥ 30%, 분류 latency ≤ 300ms) 를
-   * 측정한다.
-   */
   /**
    * 분류 결과 + 어느 tier 가 결정했는지. {@code ruleDecided}=true 면 룰(RulePreRouter), false 면 Grok 폴백. shadow
    * 워크플로우의 IntentResult tier 판정에 쓴다.
@@ -654,9 +679,12 @@ public class ChatLlmService {
                   .toList();
           searchPayload.put("scores", scores);
 
-          if (avgScore < 0.2 || maxScore < 0.21) {
+          // 점수 가드(베타 튜닝 2026-06-17, SearchExecutor 와 동일): avg<0.2 AND max<0.24 일 때만 차단.
+          // avg 가 낮아도 max≥0.24 면 최상위 레퍼런스는 관련 있다고 보고 살린다(rescue). 기존 OR(max<0.21)은
+          // 차단율 29%로 과했고 "상위장 멀쩡한데 평균에 발목" 케이스를 통째 버렸다. 근거: SearchExecutor 주석.
+          if (avgScore < 0.2 && maxScore < 0.24) {
             log.warn(
-                "❌ 무관 결과 판단: 검색 결과 차단 (avg={} < 0.2 || max={} < 0.21)",
+                "❌ 무관 결과 판단: 검색 결과 차단 (avg={} < 0.2 AND max={} < 0.24)",
                 String.format("%.3f", avgScore),
                 String.format("%.3f", maxScore));
             log.info("================================");
@@ -714,6 +742,26 @@ public class ChatLlmService {
         log.info("⏭️  SKIP — 검색 불필요 (session={})", sessionId);
         analyticsEventService.track(
             AnalyticsEventType.DECISION_SKIP,
+            user,
+            sessionId,
+            Map.of("message_length", messageLength));
+        return List.of();
+
+      case FOLLOWUP:
+        // 012 — 직전 답변 부연. 검색 없이 직전 답변을 이어 설명한다(references 비움). 빈도 관측용 analytics.
+        log.info("💬 FOLLOWUP — 직전 답변 부연 (session={})", sessionId);
+        analyticsEventService.track(
+            AnalyticsEventType.DECISION_FOLLOWUP,
+            user,
+            sessionId,
+            Map.of("message_length", messageLength));
+        return List.of();
+
+      case COMPARE:
+        // 013 — 맥락 대상 비교. 검색·생성 없이 이미 있는 대상을 비교 설명한다(references 비움). 빈도 관측용 analytics.
+        log.info("🔍 COMPARE — 맥락 대상 비교 (session={})", sessionId);
+        analyticsEventService.track(
+            AnalyticsEventType.DECISION_COMPARE,
             user,
             sessionId,
             Map.of("message_length", messageLength));
@@ -1017,6 +1065,66 @@ public class ChatLlmService {
     return s != null && !s.isBlank();
   }
 
+  /**
+   * 000 OUT_OF_DOMAIN 거절 톤 가이드 (S3' 트랙 A). 페르소나 v2 도메인 락이 이미 거절을 하지만, 룰이 000 으로 단정한 경우 COMPOSE 가
+   * 확실히 "부드럽게 거절 + 그림으로 복귀" 톤을 내도록 SYSTEM turn 으로 한 번 더 못박는다. references 없는 거절이라 [N] 인용 금지(무결성 체커가
+   * 범위밖 인용을 차단).
+   */
+  private static final String OUT_OF_DOMAIN_GUIDE =
+      "[도메인 외 질문 안내]\n"
+          + "이번 발화는 그림·드로잉과 무관한 주제(날씨·뉴스·코딩·요리 등)로 보입니다.\n"
+          + "\n"
+          + "응답 가이드:\n"
+          + "- 딱딱하게 자르지 말고 친구처럼 가볍게 거절한 뒤, 곧바로 그림 쪽으로 자연스럽게 데려오세요.\n"
+          + "- 예: \"아 그건 제가 잘 몰라요 ㅎㅎ 대신 지금 그리는 거 같이 봐드릴까요?\"\n"
+          + "- 매번 똑같은 문장 반복 금지. 상황·어조에 맞게 한 톤 가볍게.\n"
+          + "\n"
+          + "금지:\n"
+          + "- 도메인 외 주제에 실제로 답하기(날씨 알려주기, 코드 짜주기 등).\n"
+          + "- [1], [2] 같은 인용 표현 (참고 이미지 없음).\n"
+          + "- 길게 훈계하거나 매뉴얼처럼 말하기.";
+
+  /**
+   * 012 FOLLOWUP 가이드 (S3' 트랙 A). 사용자가 직전 ASSISTANT 답변을 이어 "더 설명/말로 설명/어때?"처럼 부연·재설명·평가를 요청한 경우다.
+   * 검색·생성을 안 하므로 references 가 없고, 직전 답변을 이어서 풀어주는 게 핵심. 베타에서 이 의도를 "자료 부족 → AI 생성 권유"로 오답한 게 만족도
+   * 저하의 직접 원인이라 그 톤을 명시 금지한다.
+   */
+  private static final String FOLLOWUP_GUIDE =
+      "[후속 질문 안내]\n"
+          + "이번 발화는 방금 당신(어시스턴트)이 한 답변에 대한 부연·재설명·평가 요청입니다.\n"
+          + "(예: \"더 설명\", \"말로 설명해\", \"어때?\", \"그 외는?\", \"왜 그렇게 해?\")\n"
+          + "\n"
+          + "응답 가이드:\n"
+          + "- 새 주제로 넘어가지 말고, 바로 직전 답변을 이어서 더 구체적으로 풀어주세요.\n"
+          + "- \"말로 설명\"·\"피드백해줘\"처럼 평가를 원하면, 회피하지 말고 작업물/맥락에 대해 솔직하고 구체적으로 답하세요.\n"
+          + "- 한두 문장으로 핵심을 더하거나, 직전에 말한 부분을 다른 말로 다시 설명해 주세요.\n"
+          + "\n"
+          + "금지:\n"
+          + "- \"자료가 부족한 것 같아요. AI 이미지로 생성해드릴까요?\" 류의 회피·생성 권유 (사용자는 '말'을 원함).\n"
+          + "- AI 이미지 생성 제안 (지금 맥락이 아님).\n"
+          + "- [1], [2] 같은 인용 표현 (참고 이미지 없음).\n"
+          + "- \"잠시만요\", \"어떤 부분이요?\"처럼 되묻기만 하고 답을 미루는 표현.";
+
+  /**
+   * 013 COMPARE 가이드 (S3' 트랙 A). 사용자가 이미 맥락에 나온 대상(앞서 보여준 레퍼런스·옵션)을 "1번이랑 2번 중 뭐가 나아?"처럼 비교·대조해달라고 한
+   * 경우다. FOLLOWUP 과 같은 정신 — 검색·생성을 안 하므로 references 가 없고, 이미 있는 대상을 비교 설명하는 게 핵심. 'AI 생성 권유' 오답을 명시
+   * 금지한다.
+   */
+  private static final String COMPARE_GUIDE =
+      "[비교 안내]\n"
+          + "이번 발화는 이미 대화에 나온 대상(앞서 보여준 참고 이미지·옵션·직전 답변에서 언급한 것들)을\n"
+          + "비교·대조해 달라는 요청입니다. (예: \"1번이랑 2번 중 뭐가 나아?\", \"둘 차이가 뭐야?\")\n"
+          + "\n"
+          + "응답 가이드:\n"
+          + "- 새로 검색하거나 만들지 말고, 이미 맥락에 있는 대상들을 짚어 차이점·장단점을 구체적으로 비교하세요.\n"
+          + "- 구도·명암·색감·기법 등 미술적 관점에서 각각의 특징과 어떤 상황에 어느 쪽이 나은지 설명하세요.\n"
+          + "- 한쪽으로 치우치지 말고, 사용자의 목적(예: 초보/분위기)을 고려해 균형 있게 판단을 더하세요.\n"
+          + "\n"
+          + "금지:\n"
+          + "- \"자료가 부족한 것 같아요. AI 이미지로 생성해드릴까요?\" 류의 회피·생성 권유 (사용자는 비교를 원함).\n"
+          + "- AI 이미지 생성 제안 (지금 맥락이 아님).\n"
+          + "- \"어떤 걸 비교할까요?\"처럼 되묻기만 하고 비교를 미루는 표현.";
+
   // 한글/영문 변형까지 묶어 한 번에 잡는다. 너무 좁으면 누락, 너무 넓으면 일반 대화에서 오탐.
   // 핵심 키워드: "생성" + "버튼", 또는 "만들어드릴" / "만들어 드릴" / "생성해드릴", "AI 이미지" + 동작어.
   private static final java.util.regex.Pattern GENERATE_OFFER_PATTERN =
@@ -1051,6 +1159,26 @@ public class ChatLlmService {
         .filter(s -> s.provider() == provider)
         .findFirst()
         .orElseThrow(() -> new CustomException(ErrorCode.INVALID_INPUT));
+  }
+
+  private List<LlmCallContext.Turn> trimHistory(List<LlmMessage> all, int maxNonSystem) {
+    List<LlmCallContext.Turn> systems = new ArrayList<>();
+    List<LlmCallContext.Turn> rest = new ArrayList<>();
+    for (LlmMessage m : all) {
+      if (m.getStatus() == LlmCallStatus.FAILED) {
+        continue;
+      }
+      LlmCallContext.Turn turn = new LlmCallContext.Turn(m.getRole(), m.getContent());
+      if (m.getRole() == MessageRole.SYSTEM) {
+        systems.add(turn);
+      } else {
+        rest.add(turn);
+      }
+    }
+    int from = Math.max(0, rest.size() - maxNonSystem);
+    List<LlmCallContext.Turn> trimmed = new ArrayList<>(systems);
+    trimmed.addAll(rest.subList(from, rest.size()));
+    return trimmed;
   }
 
   private void persistFailure(LlmMessage assistantMsg, Exception e) {

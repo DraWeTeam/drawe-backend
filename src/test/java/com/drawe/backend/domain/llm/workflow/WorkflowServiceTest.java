@@ -155,6 +155,17 @@ class WorkflowServiceTest {
   }
 
   @Test
+  @DisplayName("COMPARE ROUTING(COMPOSE) — 검색·생성 없이 COMPOSE 만 (013, FOLLOWUP 과 동일 종착)")
+  void compareRoute() {
+    List<StepType> order = new ArrayList<>();
+    WorkflowService wf = new WorkflowService(List.of(recording(StepType.COMPOSE, order)), registry);
+
+    wf.run(IntentResult.of(IntentCode.COMPARE, IntentResult.Tier.LLM_LIGHT), start());
+
+    assertThat(order).containsExactly(StepType.COMPOSE);
+  }
+
+  @Test
   @DisplayName("step Timer 가 메트릭에 기록된다")
   void recordsStepTimer() {
     List<StepType> order = new ArrayList<>();

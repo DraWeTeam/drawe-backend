@@ -61,3 +61,7 @@ boot_*.err
 !src/main/resources/db/seeds/*.sql
 # 설계 캡처물(스크린샷·SVG) — 리포 가볍게 유지, 커밋 제외
 docs/for_capture/
+# 베타 사용자 대화 원문·검색 로그(개인정보성) — 로컬 분석용, 레포 제외
+drawe-beta-extract/
+# e2e 검증 임시 파일(JWT 토큰 포함) — 커밋 금지
+.e2e_tmp/
