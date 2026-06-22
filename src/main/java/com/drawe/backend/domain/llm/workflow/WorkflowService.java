@@ -34,6 +34,8 @@ public class WorkflowService {
   private final MeterRegistry meterRegistry;
 
   /**
+   * 수집한 StepExecutor 빈들을 {@code type()} 키 맵으로 구성한다.
+   *
    * @param executorList 스프링이 수집한 모든 {@link StepExecutor} 빈. {@code type()} 키로 맵을 만든다. 같은 StepType 을
    *     두 빈이 주장하면 빈 등록 단계에서 막아야 하므로 명시적으로 검사한다.
    */

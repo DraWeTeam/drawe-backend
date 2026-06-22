@@ -22,6 +22,8 @@ import org.springframework.stereotype.Component;
 public class IntentResultAdapter {
 
   /**
+   * 분류 결과·슬롯 정보를 파이프라인 계약 타입 {@link IntentResult} 로 변환한다.
+   *
    * @param decision 최종 분류 결과 (룰 또는 Grok 산출)
    * @param ruleDecided 룰({@code RulePreRouter})이 결정했으면 true → tier=RULE. Grok 폴백이면 false →
    *     LLM_LIGHT.
