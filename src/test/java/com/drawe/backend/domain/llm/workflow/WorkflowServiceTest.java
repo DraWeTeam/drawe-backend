@@ -15,8 +15,8 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 /**
- * {@link WorkflowService} 단위 테스트. mock {@link StepExecutor} 로 ROUTING 순회·누적·폴백·빈충돌을 검증한다.
- * 설계: 트랙 A ③. chat() 실연결 전 단계라 순수 단위로만.
+ * {@link WorkflowService} 단위 테스트. mock {@link StepExecutor} 로 ROUTING 순회·누적·폴백·빈충돌을 검증한다. 설계: 트랙 A
+ * ③. chat() 실연결 전 단계라 순수 단위로만.
  */
 class WorkflowServiceTest {
 
@@ -56,7 +56,15 @@ class WorkflowServiceTest {
   }
 
   private StepContext start() {
-    return StepContext.start(1L, 2L, "s", "raw", "clean", IntentResult.of(IntentCode.NEW_SEARCH, IntentResult.Tier.RULE), null, List.of());
+    return StepContext.start(
+        1L,
+        2L,
+        "s",
+        "raw",
+        "clean",
+        IntentResult.of(IntentCode.NEW_SEARCH, IntentResult.Tier.RULE),
+        null,
+        List.of());
   }
 
   @Test
@@ -71,14 +79,13 @@ class WorkflowServiceTest {
                 recording(StepType.COMPOSE, order)),
             registry);
 
-    StepContext result = wf.run(IntentResult.of(IntentCode.NEW_SEARCH, IntentResult.Tier.RULE), start());
+    StepContext result =
+        wf.run(IntentResult.of(IntentCode.NEW_SEARCH, IntentResult.Tier.RULE), start());
 
     // ROUTING.NEW_SEARCH = [EXTRACT_KEYWORDS, SEARCH, COMPOSE]
-    assertThat(order)
-        .containsExactly(StepType.EXTRACT_KEYWORDS, StepType.SEARCH, StepType.COMPOSE);
+    assertThat(order).containsExactly(StepType.EXTRACT_KEYWORDS, StepType.SEARCH, StepType.COMPOSE);
     // 누적: 각 step 이 keywords 에 흔적 남김
-    assertThat(result.keywords())
-        .containsExactly("EXTRACT_KEYWORDS", "SEARCH", "COMPOSE");
+    assertThat(result.keywords()).containsExactly("EXTRACT_KEYWORDS", "SEARCH", "COMPOSE");
   }
 
   @Test
@@ -88,12 +95,11 @@ class WorkflowServiceTest {
     // COMPOSE Executor 를 일부러 빼고 등록
     WorkflowService wf =
         new WorkflowService(
-            List.of(
-                recording(StepType.EXTRACT_KEYWORDS, order),
-                recording(StepType.SEARCH, order)),
+            List.of(recording(StepType.EXTRACT_KEYWORDS, order), recording(StepType.SEARCH, order)),
             registry);
 
-    StepContext result = wf.run(IntentResult.of(IntentCode.NEW_SEARCH, IntentResult.Tier.RULE), start());
+    StepContext result =
+        wf.run(IntentResult.of(IntentCode.NEW_SEARCH, IntentResult.Tier.RULE), start());
 
     assertThat(order).containsExactly(StepType.EXTRACT_KEYWORDS, StepType.SEARCH);
     assertThat(result.keywords()).containsExactly("EXTRACT_KEYWORDS", "SEARCH");
@@ -111,7 +117,8 @@ class WorkflowServiceTest {
                 recording(StepType.COMPOSE, order)),
             registry);
 
-    StepContext result = wf.run(IntentResult.of(IntentCode.NEW_SEARCH, IntentResult.Tier.RULE), start());
+    StepContext result =
+        wf.run(IntentResult.of(IntentCode.NEW_SEARCH, IntentResult.Tier.RULE), start());
 
     // SEARCH 는 던졌지만 EXTRACT_KEYWORDS·COMPOSE 는 실행됨
     assertThat(order).containsExactly(StepType.EXTRACT_KEYWORDS, StepType.COMPOSE);
@@ -126,8 +133,7 @@ class WorkflowServiceTest {
     assertThatThrownBy(
             () ->
                 new WorkflowService(
-                    List.of(
-                        recording(StepType.SEARCH, order), recording(StepType.SEARCH, order)),
+                    List.of(recording(StepType.SEARCH, order), recording(StepType.SEARCH, order)),
                     registry))
         .isInstanceOf(IllegalStateException.class)
         .hasMessageContaining("SEARCH");
@@ -140,8 +146,7 @@ class WorkflowServiceTest {
     WorkflowService wf =
         new WorkflowService(
             List.of(
-                recording(StepType.TRANSLATE, order),
-                recording(StepType.GENERATE_IMAGE, order)),
+                recording(StepType.TRANSLATE, order), recording(StepType.GENERATE_IMAGE, order)),
             registry);
 
     wf.run(IntentResult.of(IntentCode.GENERATE, IntentResult.Tier.RULE), start());
@@ -153,8 +158,7 @@ class WorkflowServiceTest {
   @DisplayName("step Timer 가 메트릭에 기록된다")
   void recordsStepTimer() {
     List<StepType> order = new ArrayList<>();
-    WorkflowService wf =
-        new WorkflowService(List.of(recording(StepType.COMPOSE, order)), registry);
+    WorkflowService wf = new WorkflowService(List.of(recording(StepType.COMPOSE, order)), registry);
 
     wf.run(IntentResult.of(IntentCode.COMPOSITION, IntentResult.Tier.RULE), start());
 

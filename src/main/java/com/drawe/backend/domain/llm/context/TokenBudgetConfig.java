@@ -9,6 +9,7 @@ import org.springframework.context.annotation.Configuration;
  * <p>S2' Phase 6 Layer 1. 메시지 개수가 아닌 토큰 단위 예산으로 컨텍스트 trim.
  *
  * <p>application.yml 예시:
+ *
  * <pre>{@code
  * drawe:
  *   llm:

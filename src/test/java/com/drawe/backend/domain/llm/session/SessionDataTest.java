@@ -12,9 +12,8 @@ import org.junit.jupiter.api.Test;
 /**
  * {@link SessionData} 상태 전이·불변 정책 테스트.
  *
- * <p>세션 정책의 핵심 ("KEEP 시 references 유지, NEW_SEARCH 시 교체") 은 이 record 의 전이
- * 메서드에 담겨 있다. {@link RedisSessionServiceTest} 는 저장/복원 인프라를, 본 테스트는 정책
- * 자체를 검증한다.
+ * <p>세션 정책의 핵심 ("KEEP 시 references 유지, NEW_SEARCH 시 교체") 은 이 record 의 전이 메서드에 담겨 있다. {@link
+ * RedisSessionServiceTest} 는 저장/복원 인프라를, 본 테스트는 정책 자체를 검증한다.
  */
 class SessionDataTest {
 
@@ -138,7 +137,11 @@ class SessionDataTest {
   void transitionsAreImmutable() {
     SessionData original =
         new SessionData(
-            1L, 2L, List.of(ref(100L, 1)), IntentCode.NEW_SEARCH, List.of("a"),
+            1L,
+            2L,
+            List.of(ref(100L, 1)),
+            IntentCode.NEW_SEARCH,
+            List.of("a"),
             java.time.Instant.now());
 
     original.withKeep(IntentCode.KEEP);

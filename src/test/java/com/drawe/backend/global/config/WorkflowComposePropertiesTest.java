@@ -13,8 +13,8 @@ import org.junit.jupiter.api.Test;
 /**
  * WorkflowComposeProperties 부팅 검증 단위 테스트(R1 방어).
  *
- * <p>핵심: live-intents 에 COMPOSE 미종착 의도가 설정되면 부팅(@PostConstruct validateLiveIntents)에서
- * 즉시 실패해야 한다 — 런타임 500(composedOutput=null) 대신 fail-fast.
+ * <p>핵심: live-intents 에 COMPOSE 미종착 의도가 설정되면 부팅(@PostConstruct validateLiveIntents)에서 즉시 실패해야 한다 —
+ * 런타임 500(composedOutput=null) 대신 fail-fast.
  */
 class WorkflowComposePropertiesTest {
 

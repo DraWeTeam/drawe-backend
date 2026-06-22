@@ -9,22 +9,23 @@ import org.springframework.stereotype.Component;
 /**
  * 검색/생성 의도 분류의 결정론적 프리라우터.
  *
- * <p>모든 채팅 메시지가 {@link KeywordExtractor} 를 통해 Grok 으로 분류되던 것을, <b>명확한 기능 신호</b>는
- * LLM 콜 없이 룰로 먼저 분류해 LLM 콜·latency·비용을 줄인다. 설계·결정 근거:
- * {@code docs/decisions/S1A-rule-prerouter-design.md} (ADR §4 하이브리드 분류의 구현).
+ * <p>모든 채팅 메시지가 {@link KeywordExtractor} 를 통해 Grok 으로 분류되던 것을, <b>명확한 기능 신호</b>는 LLM 콜 없이 룰로 먼저 분류해
+ * LLM 콜·latency·비용을 줄인다. 설계·결정 근거: {@code docs/decisions/S1A-rule-prerouter-design.md} (ADR §4
+ * 하이브리드 분류의 구현).
  *
  * <p><b>1차 범위 = TERMINAL 케이스만</b>. 즉 룰이 매치하면 LLM 콜을 실제로 0 으로 만드는 신호에만 발화한다:
+ *
  * <ul>
- *   <li>{@code SKIP} — 인사·감사·확인 같은 짧은 단독 표현 (LLM 답변까지 생략)</li>
- *   <li>{@code GENERATE_NOW} — 명시적 생성 동사 ("그려줘", "만들어줘" 등). 사용자 원문을 그대로 담는다.
- *       {@code ImageGenerationService.generate()} 가 {@code PromptTranslator} 로 번역하므로 영문 프롬프트 불필요.</li>
+ *   <li>{@code SKIP} — 인사·감사·확인 같은 짧은 단독 표현 (LLM 답변까지 생략)
+ *   <li>{@code GENERATE_NOW} — 명시적 생성 동사 ("그려줘", "만들어줘" 등). 사용자 원문을 그대로 담는다. {@code
+ *       ImageGenerationService.generate()} 가 {@code PromptTranslator} 로 번역하므로 영문 프롬프트 불필요.
  * </ul>
  *
- * <p>{@code NEW_SEARCH}/{@code [N]번 앵커}는 어차피 검색 키워드 추출을 위해 Grok 을 호출해야 해 1차 이득이 적고
- * 오분류 위험만 늘어, 의도적으로 룰에서 제외한다(MISS 로 흘려 기존 Grok 경로 유지). 2차에서 재검토.
+ * <p>{@code NEW_SEARCH}/{@code [N]번 앵커}는 어차피 검색 키워드 추출을 위해 Grok 을 호출해야 해 1차 이득이 적고 오분류 위험만 늘어,
+ * 의도적으로 룰에서 제외한다(MISS 로 흘려 기존 Grok 경로 유지). 2차에서 재검토.
  *
- * <p>매치 실패 시 {@link Decision#miss()} → 호출 측이 기존 Grok 풀 분류로 폴백한다. 즉 이 라우터는
- * 기존 동작 위에 "공짜로 얹는" 레이어이며 회귀 위험이 없다.
+ * <p>매치 실패 시 {@link Decision#miss()} → 호출 측이 기존 Grok 풀 분류로 폴백한다. 즉 이 라우터는 기존 동작 위에 "공짜로 얹는" 레이어이며
+ * 회귀 위험이 없다.
  */
 @Slf4j
 @Component

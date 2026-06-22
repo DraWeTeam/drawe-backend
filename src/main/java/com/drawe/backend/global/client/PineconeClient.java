@@ -21,9 +21,9 @@ import org.springframework.web.reactive.function.client.WebClient;
  * <p>외부 장애 격리: 응답 타임아웃({@code .timeout}) + {@code @CircuitBreaker(name="vector")} +
  * {@code @Retry(name="vector")}. 설계: {@code docs/decisions/S1-resilience4j-design.md}.
  *
- * <p><b>주의</b>: 어노테이션이 예외 타입으로 서킷·재시도를 판정하므로 원래 예외를 감싸지 않고 그대로 전파한다. 검색 경로의 예외는 상위
- * {@code ChatLlmService.handleSearchDecision} 가 빈 레퍼런스(graceful)로, 적재 경로는 {@code AiImageIndexService}
- * 의 비동기 catch 가 받는다 — 별도 폴백 메서드 불필요.
+ * <p><b>주의</b>: 어노테이션이 예외 타입으로 서킷·재시도를 판정하므로 원래 예외를 감싸지 않고 그대로 전파한다. 검색 경로의 예외는 상위 {@code
+ * ChatLlmService.handleSearchDecision} 가 빈 레퍼런스(graceful)로, 적재 경로는 {@code AiImageIndexService} 의
+ * 비동기 catch 가 받는다 — 별도 폴백 메서드 불필요.
  */
 @Slf4j
 @Component
@@ -88,9 +88,9 @@ public class PineconeClient {
   /**
    * 벡터 하나를 지정 namespace 에 upsert.
    *
-   * <p>{@code namespace} 가 null 이면 default namespace("") — 기존 일반 적재와 동일. 가이드용
-   * 이미지 벡터는 일반 검색에 섞이지 않도록 별도 namespace(예: {@code "guide"}) 로 분리한다. 설계:
-   * {@code docs/decisions/S3-guide-namespace-design.md}.
+   * <p>{@code namespace} 가 null 이면 default namespace("") — 기존 일반 적재와 동일. 가이드용 이미지 벡터는 일반 검색에 섞이지
+   * 않도록 별도 namespace(예: {@code "guide"}) 로 분리한다. 설계: {@code
+   * docs/decisions/S3-guide-namespace-design.md}.
    *
    * @param id Pinecone vector ID. Image.sourceId와 동일 값을 사용 (예: "ai_1234")
    * @param vector L2 정규화된 768차원 CLIP 벡터

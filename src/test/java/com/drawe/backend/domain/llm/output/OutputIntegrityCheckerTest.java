@@ -13,8 +13,8 @@ import org.junit.jupiter.api.Test;
 /**
  * OutputIntegrityChecker 단위 테스트(설계 §5, ADR §6.3) — 결정론적 참조 무결성.
  *
- * <p>DoD: 환각 인용 0건. 유효 범위 밖 인용은 본문 {@code [N]}·citations 양쪽에서 제거되고 응답은 통과해야 한다
- * (문장 전체 삭제 아님). refs 가 없으면 모든 인용이 환각.
+ * <p>DoD: 환각 인용 0건. 유효 범위 밖 인용은 본문 {@code [N]}·citations 양쪽에서 제거되고 응답은 통과해야 한다 (문장 전체 삭제 아님). refs
+ * 가 없으면 모든 인용이 환각.
  */
 class OutputIntegrityCheckerTest {
 

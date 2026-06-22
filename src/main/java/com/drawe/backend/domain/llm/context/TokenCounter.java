@@ -11,11 +11,10 @@ import org.springframework.stereotype.Component;
 /**
  * JTokkit 기반 토큰 카운터.
  *
- * <p>S2' Phase 6 Layer 1. GPT-4 인코딩 (cl100k_base) 사용 — Claude·Grok 도 비슷한 BPE
- * 토크나이저를 쓰므로 정확하지는 않아도 운영 모니터링·예산 통제에 충분.
+ * <p>S2' Phase 6 Layer 1. GPT-4 인코딩 (cl100k_base) 사용 — Claude·Grok 도 비슷한 BPE 토크나이저를 쓰므로 정확하지는 않아도
+ * 운영 모니터링·예산 통제에 충분.
  *
- * <p>한국어는 영어보다 토큰 효율이 낮은 편이지만 (한 글자 ~2-3 토큰), 동일 인코더로 측정하면
- * 상대 비교는 정확하다.
+ * <p>한국어는 영어보다 토큰 효율이 낮은 편이지만 (한 글자 ~2-3 토큰), 동일 인코더로 측정하면 상대 비교는 정확하다.
  */
 @Component
 public class TokenCounter {
@@ -27,9 +26,7 @@ public class TokenCounter {
 
   public TokenCounter() {
     EncodingRegistry registry = Encodings.newDefaultEncodingRegistry();
-    this.encoding =
-        registry
-            .getEncodingForModel(ModelType.GPT_4);
+    this.encoding = registry.getEncodingForModel(ModelType.GPT_4);
   }
 
   /** 텍스트의 토큰 수. null/빈 문자열은 0. */

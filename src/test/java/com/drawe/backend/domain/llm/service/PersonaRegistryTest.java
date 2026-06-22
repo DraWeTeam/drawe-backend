@@ -9,8 +9,8 @@ import org.junit.jupiter.api.Test;
 /**
  * PersonaRegistry 단위 테스트 (S2' 트랙 A ⑥, 설계 §6.1).
  *
- * <p>핵심: v2(FRIENDLY_02)가 structured output 인용 규칙을 강화해 추가됐고, v1 은 롤백용으로 보존되며
- * DEFAULT_KEY 는 아직 v1 이다(전환은 A/B 관측 후 별도).
+ * <p>핵심: v2(FRIENDLY_02)가 structured output 인용 규칙을 강화해 추가됐고, v1 은 롤백용으로 보존되며 DEFAULT_KEY 는 아직 v1
+ * 이다(전환은 A/B 관측 후 별도).
  */
 class PersonaRegistryTest {
 

@@ -20,14 +20,15 @@ import org.springframework.transaction.annotation.Transactional;
 /**
  * 장기 미활성 세션 자동 청소 (MySQL).
  *
- * <p>S2' Phase 6 Layer 0. {@link ChatSession#getLastActive()} 기준으로 임계 시간 이전의 세션과
- * 그 세션의 {@code LlmMessage} 들을 일괄 삭제.
+ * <p>S2' Phase 6 Layer 0. {@link ChatSession#getLastActive()} 기준으로 임계 시간 이전의 세션과 그 세션의 {@code
+ * LlmMessage} 들을 일괄 삭제.
  *
  * <p>임계 기본값 90일 — 한 분기 단위. 사용자가 한 달 휴식 후 돌아와도 대화 기록 보존.
  *
  * <p>베타 안전을 위해 기본 비활성. 운영 시 {@code drawe.session.cleanup-enabled=true} 로 활성화.
  *
  * <p>application.yml 예시:
+ *
  * <pre>{@code
  * drawe:
  *   session:
@@ -38,8 +39,7 @@ import org.springframework.transaction.annotation.Transactional;
  *
  * <p>스프링 부트 메인 클래스에 {@code @EnableScheduling} 이 활성화되어 있어야 한다.
  *
- * <p>관련: 단기 메모리 ({@link RedisSessionService}) 는 24h TTL 자동 만료. 본 스케줄러는 장기
- * (MySQL) 만 담당.
+ * <p>관련: 단기 메모리 ({@link RedisSessionService}) 는 24h TTL 자동 만료. 본 스케줄러는 장기 (MySQL) 만 담당.
  */
 @Slf4j
 @Component
@@ -67,8 +67,7 @@ public class SessionCleanupScheduler {
         Counter.builder(METRIC_CLEANED)
             .description("Number of stale chat sessions cleaned up")
             .register(meterRegistry);
-    log.info(
-        "SessionCleanupScheduler 활성화 — inactiveThresholdDays={}", inactiveThresholdDays);
+    log.info("SessionCleanupScheduler 활성화 — inactiveThresholdDays={}", inactiveThresholdDays);
   }
 
   /** 매일 새벽 4시 (기본). cron 설정으로 조정 가능. */
