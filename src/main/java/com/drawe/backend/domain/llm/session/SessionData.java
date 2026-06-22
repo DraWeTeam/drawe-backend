@@ -10,30 +10,26 @@ import java.util.List;
 /**
  * 프로젝트 단위 휘발성 대화 컨텍스트 (Redis 저장).
  *
- * <p>S2' Phase 6 — 단기 메모리. 멀티턴 효율을 위해 직전 검색 결과·의도·키워드를 빠르게 lookup
- * 가능한 위치에 저장.
+ * <p>S2' Phase 6 — 단기 메모리. 멀티턴 효율을 위해 직전 검색 결과·의도·키워드를 빠르게 lookup 가능한 위치에 저장.
  *
  * <p>저장 위치: Redis ({@code session:{userId}:{projectId}})
+ *
  * <p>TTL: 24시간 (활동 시 갱신)
  *
- * <p>장기 메모리 (영구) 는 MySQL 의 {@code ChatSession} + {@code LlmMessage}. Redis cache miss
- * 시 {@link SessionService#getOrRestore} 가 MySQL 에서 복원.
+ * <p>장기 메모리 (영구) 는 MySQL 의 {@code ChatSession} + {@code LlmMessage}. Redis cache miss 시 {@link
+ * SessionService#getOrRestore} 가 MySQL 에서 복원.
  */
 public record SessionData(
-        Long userId,
-        Long projectId,
-
-        /** 직전 검색 결과 — KEEP 의도 시 SYSTEM 블록으로 주입 (멀티턴 핵심). */
-        List<ReferenceImage> previousReferences,
-
-        /** 직전 의도 — 후속 의도 분류 정확도 보조. MySQL 복원 시에는 null. */
-        IntentCode lastIntent,
-
-        /** 직전 추출 키워드 — 디버깅·메트릭. */
-        List<String> lastKeywords,
-
-        /** 마지막 활동 시각. */
-        Instant lastUpdatedAt) {
+    Long userId,
+    Long projectId,
+    // 직전 검색 결과 — KEEP 의도 시 SYSTEM 블록으로 주입 (멀티턴 핵심).
+    List<ReferenceImage> previousReferences,
+    // 직전 의도 — 후속 의도 분류 정확도 보조. MySQL 복원 시에는 null.
+    IntentCode lastIntent,
+    // 직전 추출 키워드 — 디버깅·메트릭.
+    List<String> lastKeywords,
+    // 마지막 활동 시각.
+    Instant lastUpdatedAt) {
 
   @JsonCreator
   public SessionData(

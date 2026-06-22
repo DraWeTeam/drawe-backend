@@ -10,8 +10,8 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 /**
- * {@link IntentResultAdapter} 단위 테스트 — 4 Action → IntentCode 매핑 + tier 판정 + 슬롯 전달.
- * 설계: {@code docs/decisions/S1A-intent-classifier-design.md}.
+ * {@link IntentResultAdapter} 단위 테스트 — 4 Action → IntentCode 매핑 + tier 판정 + 슬롯 전달. 설계: {@code
+ * docs/decisions/S1A-intent-classifier-design.md}.
  */
 class IntentResultAdapterTest {
 
@@ -94,20 +94,31 @@ class IntentResultAdapterTest {
   @Test
   @DisplayName("미술 의도 세분류된 KEEP → 001~004 (②-2차)")
   void keepWithArtIntent() {
-    assertThat(adapter.adapt(ExtractionResult.keep(IntentCode.COMPOSITION), false, List.of(), false).code())
+    assertThat(
+            adapter
+                .adapt(ExtractionResult.keep(IntentCode.COMPOSITION), false, List.of(), false)
+                .code())
         .isEqualTo(IntentCode.COMPOSITION);
-    assertThat(adapter.adapt(ExtractionResult.keep(IntentCode.LIGHTING), false, List.of(), false).code())
+    assertThat(
+            adapter
+                .adapt(ExtractionResult.keep(IntentCode.LIGHTING), false, List.of(), false)
+                .code())
         .isEqualTo(IntentCode.LIGHTING);
-    assertThat(adapter.adapt(ExtractionResult.keep(IntentCode.COLOR), false, List.of(), false).code())
+    assertThat(
+            adapter.adapt(ExtractionResult.keep(IntentCode.COLOR), false, List.of(), false).code())
         .isEqualTo(IntentCode.COLOR);
-    assertThat(adapter.adapt(ExtractionResult.keep(IntentCode.TECHNIQUE), false, List.of(), false).code())
+    assertThat(
+            adapter
+                .adapt(ExtractionResult.keep(IntentCode.TECHNIQUE), false, List.of(), false)
+                .code())
         .isEqualTo(IntentCode.TECHNIQUE);
   }
 
   @Test
   @DisplayName("미술 의도 분류된 KEEP 도 tier 는 그대로 (Grok 결정이면 LLM_LIGHT)")
   void keepArtIntentTier() {
-    assertThat(adapter.adapt(ExtractionResult.keep(IntentCode.COLOR), false, List.of(), false).tier())
+    assertThat(
+            adapter.adapt(ExtractionResult.keep(IntentCode.COLOR), false, List.of(), false).tier())
         .isEqualTo(IntentResult.Tier.LLM_LIGHT);
   }
 

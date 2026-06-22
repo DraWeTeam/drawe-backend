@@ -24,23 +24,24 @@ import org.springframework.stereotype.Service;
 /**
  * Redis 기반 {@link SessionService} 구현 + MySQL 폴백.
  *
- * <p>S2' Phase 6 — 단기 메모리. 멀티턴 효율 (KEEP 의도 시 previousReferences 즉시 lookup) 이
- * 주 목적.
+ * <p>S2' Phase 6 — 단기 메모리. 멀티턴 효율 (KEEP 의도 시 previousReferences 즉시 lookup) 이 주 목적.
  *
  * <p>흐름:
+ *
  * <ol>
- *   <li>Redis hit → 즉시 반환, TTL 갱신, {@code drawe.session.cache.hit} 증가</li>
- *   <li>Redis miss → MySQL 의 직전 ASSISTANT 메시지 references 복원, Redis 재저장,
- *       {@code drawe.session.cache.miss}·{@code drawe.session.cache.restored} 증가</li>
- *   <li>MySQL 도 없음 → {@link SessionData#start} 반환 (새 세션)</li>
+ *   <li>Redis hit → 즉시 반환, TTL 갱신, {@code drawe.session.cache.hit} 증가
+ *   <li>Redis miss → MySQL 의 직전 ASSISTANT 메시지 references 복원, Redis 재저장, {@code
+ *       drawe.session.cache.miss}·{@code drawe.session.cache.restored} 증가
+ *   <li>MySQL 도 없음 → {@link SessionData#start} 반환 (새 세션)
  * </ol>
  *
  * <p>직렬화: {@link ObjectMapper} (Jackson, JavaTimeModule 필요).
  *
  * <p>의존성:
+ *
  * <ul>
- *   <li>{@code spring-boot-starter-data-redis} (build.gradle)</li>
- *   <li>{@code spring.data.redis.*} 설정 (application.yml)</li>
+ *   <li>{@code spring-boot-starter-data-redis} (build.gradle)
+ *   <li>{@code spring.data.redis.*} 설정 (application.yml)
  * </ul>
  */
 @Slf4j
@@ -164,8 +165,7 @@ public class RedisSessionService implements SessionService {
     try {
       json = redisTemplate.opsForValue().get(key);
     } catch (Exception e) {
-      log.warn(
-          "Redis read failed — key={}, error_class={}", key, e.getClass().getSimpleName());
+      log.warn("Redis read failed — key={}, error_class={}", key, e.getClass().getSimpleName());
       return Optional.empty();
     }
 
@@ -177,9 +177,7 @@ public class RedisSessionService implements SessionService {
       return Optional.of(objectMapper.readValue(json, SessionData.class));
     } catch (JsonProcessingException e) {
       log.warn(
-          "Session deserialize failed — key={}, error_class={}",
-          key,
-          e.getClass().getSimpleName());
+          "Session deserialize failed — key={}, error_class={}", key, e.getClass().getSimpleName());
       // 깨진 데이터 정리
       try {
         redisTemplate.delete(key);
@@ -196,8 +194,7 @@ public class RedisSessionService implements SessionService {
    * <p>index 는 1-based, 리스트 순서대로 할당. tags 는 technique·subject·mood 를 합산.
    * photographerUsername·source 는 ReferenceImage 에 없어 누락 (KEEP 의도 SYSTEM 구성엔 불필요).
    */
-  private List<ReferenceImage> convertToReferenceImages(
-      List<ChatResponse.ReferenceItem> items) {
+  private List<ReferenceImage> convertToReferenceImages(List<ChatResponse.ReferenceItem> items) {
     if (items == null || items.isEmpty()) {
       return List.of();
     }
@@ -211,9 +208,7 @@ public class RedisSessionService implements SessionService {
               i + 1, // 1-based index
               item.url(),
               item.photographerName(),
-              item.similarity() != null
-                  ? BigDecimal.valueOf(item.similarity())
-                  : BigDecimal.ZERO,
+              item.similarity() != null ? BigDecimal.valueOf(item.similarity()) : BigDecimal.ZERO,
               mergeTags(item)));
     }
     return result;

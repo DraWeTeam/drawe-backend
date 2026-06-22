@@ -14,10 +14,10 @@ import org.springframework.context.annotation.Configuration;
 /**
  * {@link KeywordExtractorFallback} 빈 배선 검증.
  *
- * <p>단위 테스트({@code GrokKeywordExtractorFallbackTest})는 GrokService mock 으로 파싱만 본다.
- * 본 테스트는 그와 별개로 <b>컨텍스트 로딩 시 활성 fallback 빈이 무엇인지</b>를 검증한다 —
- * 즉 {@link GrokKeywordExtractorFallback} 가 등록되면 {@link NoopKeywordExtractorFallback} 의
- * {@code @ConditionalOnMissingBean} 이 깨져 Noop 이 비활성화되는지(= 실제 폴백이 Grok 인지).
+ * <p>단위 테스트({@code GrokKeywordExtractorFallbackTest})는 GrokService mock 으로 파싱만 본다. 본 테스트는 그와 별개로
+ * <b>컨텍스트 로딩 시 활성 fallback 빈이 무엇인지</b>를 검증한다 — 즉 {@link GrokKeywordExtractorFallback} 가 등록되면 {@link
+ * NoopKeywordExtractorFallback} 의 {@code @ConditionalOnMissingBean} 이 깨져 Noop 이 비활성화되는지(= 실제 폴백이
+ * Grok 인지).
  *
  * <p>DB/Redis/외부 의존성 없이 {@link ApplicationContextRunner} 로 fallback 빈들만 띄운다.
  */
@@ -68,8 +68,7 @@ class KeywordExtractorFallbackWiringTest {
             ctx -> {
               assertThat(ctx).hasSingleBean(KeywordExtractorFallback.class);
               // Noop 은 람다라 타입 비교 대신 동작으로 확인: 항상 빈 리스트
-              assertThat(ctx.getBean(KeywordExtractorFallback.class).extract("아무 입력"))
-                  .isEmpty();
+              assertThat(ctx.getBean(KeywordExtractorFallback.class).extract("아무 입력")).isEmpty();
             });
   }
 }

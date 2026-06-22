@@ -34,8 +34,7 @@ class SessionCleanupSchedulerTest {
     llmMessageRepository = Mockito.mock(LlmMessageRepository.class);
     registry = new SimpleMeterRegistry();
 
-    scheduler =
-        new SessionCleanupScheduler(chatSessionRepository, llmMessageRepository, registry);
+    scheduler = new SessionCleanupScheduler(chatSessionRepository, llmMessageRepository, registry);
     ReflectionTestUtils.setField(scheduler, "inactiveThresholdDays", 30);
     scheduler.init();
   }
@@ -43,8 +42,7 @@ class SessionCleanupSchedulerTest {
   @Test
   @DisplayName("청소 대상 없으면 무동작")
   void noStaleSessions() {
-    when(chatSessionRepository.findAllByLastActiveBefore(any(Instant.class)))
-        .thenReturn(List.of());
+    when(chatSessionRepository.findAllByLastActiveBefore(any(Instant.class))).thenReturn(List.of());
 
     scheduler.cleanupStaleSessions();
 
@@ -92,8 +90,7 @@ class SessionCleanupSchedulerTest {
     when(chatSessionRepository.findAllByLastActiveBefore(any(Instant.class)))
         .thenReturn(List.of(s1, s2));
 
-    doThrow(new RuntimeException("DB error"))
-        .when(llmMessageRepository).deleteByChatSession(s1);
+    doThrow(new RuntimeException("DB error")).when(llmMessageRepository).deleteByChatSession(s1);
 
     scheduler.cleanupStaleSessions();
 
@@ -112,8 +109,7 @@ class SessionCleanupSchedulerTest {
   @Test
   @DisplayName("cutoff 는 inactiveThresholdDays(=30) 만큼 과거로 계산")
   void cutoffReflectsThreshold() {
-    when(chatSessionRepository.findAllByLastActiveBefore(any(Instant.class)))
-        .thenReturn(List.of());
+    when(chatSessionRepository.findAllByLastActiveBefore(any(Instant.class))).thenReturn(List.of());
 
     Instant before = Instant.now().minus(30, ChronoUnit.DAYS);
     scheduler.cleanupStaleSessions();
@@ -123,7 +119,6 @@ class SessionCleanupSchedulerTest {
     verify(chatSessionRepository).findAllByLastActiveBefore(cutoff.capture());
 
     // cutoff ≈ now - 30d (실행 사이 시각 오차 허용)
-    assertThat(cutoff.getValue())
-        .isBetween(before.minusSeconds(5), after.plusSeconds(5));
+    assertThat(cutoff.getValue()).isBetween(before.minusSeconds(5), after.plusSeconds(5));
   }
 }

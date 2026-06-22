@@ -39,8 +39,8 @@ public class ImageController {
   }
 
   /**
-   * 이미지 바이트 서빙. 브라우저 {@code <img src>} 가 직접 호출하므로 토큰·소유자 검증 대신 서명(exp+sig)으로 접근 제어한다
-   * ({@link ImageUrlSigner}). 서명 URL 은 {@code SearchService}/{@code ChatLlmService} 가 노출 직전에 발급한다.
+   * 이미지 바이트 서빙. 브라우저 {@code <img src>} 가 직접 호출하므로 토큰·소유자 검증 대신 서명(exp+sig)으로 접근 제어한다 ({@link
+   * ImageUrlSigner}). 서명 URL 은 {@code SearchService}/{@code ChatLlmService} 가 노출 직전에 발급한다.
    */
   @GetMapping("/{id}")
   public ResponseEntity<byte[]> view(

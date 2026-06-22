@@ -7,9 +7,8 @@ import org.springframework.stereotype.Component;
 public class PersonaRegistry {
 
   /**
-   * 현재 기본 페르소나 = v2(FRIENDLY_02). v2 는 v1 + 인용 규칙 structured output 정합 강화 +
-   * 거절/인사 톤 완화(딱딱한 단일 거절 문구 → 상황별 다양화, 감사·인사는 거절 안 함)라 상위호환이다.
-   * v1(FRIENDLY_01)은 롤백용으로 PERSONAS 에 보존한다.
+   * 현재 기본 페르소나 = v2(FRIENDLY_02). v2 는 v1 + 인용 규칙 structured output 정합 강화 + 거절/인사 톤 완화(딱딱한 단일 거절 문구
+   * → 상황별 다양화, 감사·인사는 거절 안 함)라 상위호환이다. v1(FRIENDLY_01)은 롤백용으로 PERSONAS 에 보존한다.
    */
   public static final String DEFAULT_KEY = "FRIENDLY_02";
 

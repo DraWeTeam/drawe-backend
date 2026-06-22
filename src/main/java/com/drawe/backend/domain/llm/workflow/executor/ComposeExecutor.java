@@ -29,10 +29,10 @@ import org.springframework.stereotype.Component;
 /**
  * COMPOSE 단계 실행기 — 페르소나 + 레퍼런스 컨텍스트로 최종 가이드 응답을 LLM 으로 생성한다 (A 소유).
  *
- * <p><b>실연결(트랙 A ④)</b>: 기존 {@code ChatLlmService.chat()} 안에 흩어져 있던 LLM 합성 로직을 이관했다.
- * 책임 절단선 — 이 Executor 는 <b>순수 합성</b>(referenceContext 구성 → 스키마 강제 LLM 호출 → 파싱 → 무결성 검사)만
- * 떠안고, {@code ctx.withComposedOutput(...)} 로 결과를 돌려준다. 저장(LlmMessage)·analytics·메트릭·ChatResponse
- * 조립 같은 부수효과는 {@code ChatLlmService} 에 남는다(설계 §3.2).
+ * <p><b>실연결(트랙 A ④)</b>: 기존 {@code ChatLlmService.chat()} 안에 흩어져 있던 LLM 합성 로직을 이관했다. 책임 절단선 — 이
+ * Executor 는 <b>순수 합성</b>(referenceContext 구성 → 스키마 강제 LLM 호출 → 파싱 → 무결성 검사)만 떠안고, {@code
+ * ctx.withComposedOutput(...)} 로 결과를 돌려준다. 저장(LlmMessage)·analytics·메트릭·ChatResponse 조립 같은 부수효과는
+ * {@code ChatLlmService} 에 남는다(설계 §3.2).
  *
  * <p>입력은 {@link StepContext} 가 분류 단계에서 실어 온 {@code history}(persona·userPrefs SYSTEM turn 포함),
  * {@code references}(B 가 채운 검색 결과), 멀티모달 {@code uploadedImageBytes}, 그리고 {@code provider} 다.
@@ -43,8 +43,8 @@ import org.springframework.stereotype.Component;
 public class ComposeExecutor implements StepExecutor {
 
   /**
-   * LLM 본문에 생성 안내 표현이 섞이면 offerGenerate 를 강제 노출(§6). 페르소나로 톤을 자제시켜도 가끔
-   * "버튼으로 만들어드릴게요" 류가 나오는데, 본문은 약속하고 버튼은 안 뜨면 모순이 사용자에게 보인다.
+   * LLM 본문에 생성 안내 표현이 섞이면 offerGenerate 를 강제 노출(§6). 페르소나로 톤을 자제시켜도 가끔 "버튼으로 만들어드릴게요" 류가 나오는데, 본문은
+   * 약속하고 버튼은 안 뜨면 모순이 사용자에게 보인다.
    */
   private static final Pattern GENERATE_OFFER_PATTERN =
       Pattern.compile(
@@ -121,7 +121,7 @@ public class ComposeExecutor implements StepExecutor {
     ComposedOutput corrected = integrity.output();
 
     // 4. 본문에 생성 안내 표현이 있으면 offerGenerate 강제 노출(§6).
-    ComposedOutput finalOutput = applyGenerateOfferHint(corrected);
+    final ComposedOutput finalOutput = applyGenerateOfferHint(corrected);
 
     // 5. DoD 메트릭(§5.2). provider 태그는 유한 열거값(GROK/CLAUDE/GEMINI).
     String providerTag = ctx.provider() == null ? "unknown" : ctx.provider().name();
@@ -149,10 +149,10 @@ public class ComposeExecutor implements StepExecutor {
   }
 
   /**
-   * 환각 인용 메트릭 발사(§5.2, DoD 0건). source 분류: refs 가 비어 있었으면({@code no_refs}) citations·본문
-   * 위반을 모두 {@code no_refs} 로 합산한다(참고가 0인데 인용한 것이라 출처 구분이 무의미). refs 가 있었으면
-   * citations 슬롯 범위밖 = {@code citations_field}, 본문 [N] 범위밖 = {@code body_scan}. 제거 총수는
-   * 관측용 {@code citation_removed} 로 별도 발사. count 0 인 발사는 메서드 쪽에서 무시한다.
+   * 환각 인용 메트릭 발사(§5.2, DoD 0건). source 분류: refs 가 비어 있었으면({@code no_refs}) citations·본문 위반을 모두
+   * {@code no_refs} 로 합산한다(참고가 0인데 인용한 것이라 출처 구분이 무의미). refs 가 있었으면 citations 슬롯 범위밖 = {@code
+   * citations_field}, 본문 [N] 범위밖 = {@code body_scan}. 제거 총수는 관측용 {@code citation_removed} 로 별도 발사.
+   * count 0 인 발사는 메서드 쪽에서 무시한다.
    */
   private void emitHallucinationMetrics(IntegrityResult integrity) {
     if (integrity.noRefs()) {
@@ -187,8 +187,8 @@ public class ComposeExecutor implements StepExecutor {
   }
 
   /**
-   * references → SYSTEM turn 본문. {@link ReferenceImage} 기준으로 1-based 인덱스·점수·태그를 나열하고
-   * 인용 규칙([N])과 가짜 결과 금지 가이드를 동봉한다. references 가 비면 "참고 없음" 안내로 대체한다.
+   * references → SYSTEM turn 본문. {@link ReferenceImage} 기준으로 1-based 인덱스·점수·태그를 나열하고 인용 규칙([N])과 가짜
+   * 결과 금지 가이드를 동봉한다. references 가 비면 "참고 없음" 안내로 대체한다.
    */
   private String buildReferenceContext(List<ReferenceImage> references, IntentCode code) {
     if (references.isEmpty()) {

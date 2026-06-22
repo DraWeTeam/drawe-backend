@@ -46,7 +46,8 @@ class OutputParserTest {
     @DisplayName("citations 안의 비정수 원소는 무시(범위 검사는 무결성 단계 몫)")
     void nonIntegerCitationsIgnored() {
       ComposedOutput out =
-          parser.parse("{\"message\":\"안내\",\"citations\":[1,\"x\",2.5,3],\"offer_generate\":false}");
+          parser.parse(
+              "{\"message\":\"안내\",\"citations\":[1,\"x\",2.5,3],\"offer_generate\":false}");
 
       assertThat(out.citations()).containsExactly(1, 3);
     }
@@ -91,7 +92,10 @@ class OutputParserTest {
     @Test
     @DisplayName("message 가 빈 문자열이면 폴백")
     void blankMessage() {
-      assertThat(parser.parse("{\"message\":\"  \",\"citations\":[],\"offer_generate\":false}").message())
+      assertThat(
+              parser
+                  .parse("{\"message\":\"  \",\"citations\":[],\"offer_generate\":false}")
+                  .message())
           .isEqualTo(OutputParser.BROKEN_JSON_FALLBACK_MESSAGE);
     }
   }

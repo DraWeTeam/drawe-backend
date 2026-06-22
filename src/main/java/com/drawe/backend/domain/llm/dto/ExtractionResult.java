@@ -7,9 +7,9 @@ import com.drawe.backend.domain.llm.contract.IntentCode;
  *
  * @param action 기능 분기 (검색/유지/스킵/생성)
  * @param keywords NEW_SEARCH 면 영문 검색 키워드, GENERATE_NOW 면 생성 프롬프트(또는 한국어 원문). 그 외 null.
- * @param artIntent KEEP 일 때 미술 의도 세분류 (001 구도/002 빛/003 색/004 기법). 분류 불가·미분류 또는 KEEP 이 아니면
- *     null. 트랙 A ②-2차에서 KEEP 을 IntentCode 001~004 로 세분화하기 위한 슬롯. 어댑터가 이 값으로 IntentResult.code
- *     를 정한다(null 이면 006 KEEP 유지).
+ * @param artIntent KEEP 일 때 미술 의도 세분류 (001 구도/002 빛/003 색/004 기법). 분류 불가·미분류 또는 KEEP 이 아니면 null. 트랙
+ *     A ②-2차에서 KEEP 을 IntentCode 001~004 로 세분화하기 위한 슬롯. 어댑터가 이 값으로 IntentResult.code 를 정한다(null 이면
+ *     006 KEEP 유지).
  */
 public record ExtractionResult(Action action, String keywords, IntentCode artIntent) {
   public enum Action {
@@ -42,8 +42,8 @@ public record ExtractionResult(Action action, String keywords, IntentCode artInt
   }
 
   /**
-   * 미술 의도가 세분류된 KEEP. {@code artIntent} 는 001 COMPOSITION / 002 LIGHTING / 003 COLOR / 004 TECHNIQUE
-   * 중 하나여야 한다.
+   * 미술 의도가 세분류된 KEEP. {@code artIntent} 는 001 COMPOSITION / 002 LIGHTING / 003 COLOR / 004
+   * TECHNIQUE 중 하나여야 한다.
    */
   public static ExtractionResult keep(IntentCode artIntent) {
     return new ExtractionResult(Action.KEEP, null, artIntent);
