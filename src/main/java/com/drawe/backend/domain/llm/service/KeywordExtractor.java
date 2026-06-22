@@ -2,6 +2,7 @@ package com.drawe.backend.domain.llm.service;
 
 import com.drawe.backend.domain.enums.LlmProvider;
 import com.drawe.backend.domain.enums.MessageRole;
+import com.drawe.backend.domain.llm.contract.IntentCode;
 import com.drawe.backend.domain.llm.dto.ExtractionResult;
 import com.drawe.backend.domain.llm.dto.LlmCallContext;
 import com.drawe.backend.domain.llm.dto.LlmCallResult;
@@ -86,6 +87,23 @@ public class KeywordExtractor {
           - "[N]번 같은 거 더" → NEW_SEARCH (anchor pattern)
           - "[N]번 어떻게 그려" → KEEP (technique question)
 
+          ### KEEP art-intent label (REQUIRED when KEEP)
+
+          When you decide KEEP, also classify the art intent of the question into
+          exactly ONE of these labels, output as "KEEP: <LABEL>":
+          - COMPOSITION — 구도/배치/시점/프레이밍 (layout, pose framing, perspective, balance)
+          - LIGHTING    — 빛/명암/그림자/하이라이트 (light source, shadow, highlight, value)
+          - COLOR       — 색감/색상/팔레트/채도 (hue, palette, saturation, color harmony)
+          - TECHNIQUE   — 그리는 방법/도구/매체/붓질 (how-to, brushwork, medium, rendering)
+
+          If the question fits none clearly or is ambiguous, output bare "KEEP" (no label).
+          Examples:
+          - "이 구도 어떻게 잡아요?"        → KEEP: COMPOSITION
+          - "그림자를 어떻게 넣어요?"        → KEEP: LIGHTING
+          - "이 색감 어떻게 만들어요?"       → KEEP: COLOR
+          - "수채화 번지는 기법 알려줘"       → KEEP: TECHNIQUE
+          - "더 자세히 알려줘"              → KEEP   (ambiguous, no label)
+
           ## 3. SKIP
 
           No visual reference needed at all.
@@ -124,7 +142,7 @@ public class KeywordExtractor {
 
           Output format: EXACTLY one line, no quotes, no extra text.
           - NEW_SEARCH: cherry blossoms spring landscape
-          - KEEP
+          - KEEP: COMPOSITION     (KEEP with art-intent label; or bare "KEEP" if ambiguous)
           - SKIP
           - GENERATE_NOW: a cheerful golden retriever walking in soft sunlight, watercolor style
 
@@ -280,8 +298,19 @@ public class KeywordExtractor {
       return ExtractionResult.generateNow(prompt);
     }
 
+    if (output.startsWith("KEEP:")) {
+      String label = output.substring("KEEP:".length()).trim();
+      IntentCode artIntent = parseArtIntent(label);
+      if (artIntent == null) {
+        log.debug("이전 references 유지 (KEEP, 미술 의도 라벨 미인식: '{}')", label);
+        return ExtractionResult.keep();
+      }
+      log.debug("이전 references 유지 (KEEP, art_intent={})", artIntent.code());
+      return ExtractionResult.keep(artIntent);
+    }
+
     if ("KEEP".equalsIgnoreCase(output)) {
-      log.debug("이전 references 유지 (KEEP)");
+      log.debug("이전 references 유지 (KEEP, 미분류)");
       return ExtractionResult.keep();
     }
 
@@ -292,6 +321,23 @@ public class KeywordExtractor {
 
     log.warn("판단 결과 형식 오류, SKIP 처리: output_length={}", output.length());
     return ExtractionResult.skip();
+  }
+
+  /**
+   * KEEP 라벨(COMPOSITION/LIGHTING/COLOR/TECHNIQUE)을 미술 의도 {@link IntentCode}(001~004)로 매핑. 인식 불가면
+   * null → 호출 측이 미분류 KEEP(006) 으로 폴백.
+   */
+  private IntentCode parseArtIntent(String label) {
+    if (label == null || label.isBlank()) {
+      return null;
+    }
+    return switch (label.trim().toUpperCase()) {
+      case "COMPOSITION" -> IntentCode.COMPOSITION; // 001
+      case "LIGHTING" -> IntentCode.LIGHTING; // 002
+      case "COLOR" -> IntentCode.COLOR; // 003
+      case "TECHNIQUE" -> IntentCode.TECHNIQUE; // 004
+      default -> null;
+    };
   }
 
   private LlmService pickService(LlmProvider provider) {

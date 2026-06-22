@@ -14,7 +14,6 @@ public class LlmProperties {
   private Provider gemini = new Provider();
   private Provider grok = new Provider();
   private Provider claude = new Provider();
-  private long timeoutMs = 60000L;
   private int maxHistory = 20;
   private String defaultProvider = "gemini";
 

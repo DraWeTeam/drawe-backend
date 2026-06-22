@@ -7,6 +7,7 @@ import com.drawe.backend.domain.UserPrefTag;
 import com.drawe.backend.domain.enums.Axis;
 import com.drawe.backend.domain.image.repository.ImageDraweTagRepository;
 import com.drawe.backend.domain.image.repository.ImageRepository;
+import com.drawe.backend.domain.image.service.ImageUrlSigner;
 import com.drawe.backend.domain.onboarding.UserPrefTagRepository;
 import com.drawe.backend.domain.onboarding.dto.OnboardingImage;
 import java.util.*;
@@ -23,6 +24,7 @@ public class OnboardingService {
   private final ImageRepository imageRepository;
   private final ImageDraweTagRepository imageDraweTagRepository;
   private final UserPrefTagRepository userPrefTagRepository;
+  private final ImageUrlSigner imageUrlSigner;
 
   /** 사용자가 온보딩 완료했는지 여부. */
   @Transactional(readOnly = true)
@@ -55,7 +57,7 @@ public class OnboardingService {
               String label = buildLabel(tag);
               return new OnboardingImage(
                   img.getId(),
-                  img.getUrl(),
+                  imageUrlSigner.sign(img.getUrl()),
                   tag != null ? tag.getTechnique() : null,
                   tag != null ? tag.getSubject() : null,
                   tag != null ? tag.getMood() : null,
@@ -75,15 +77,14 @@ public class OnboardingService {
     // 기존 user_pref_tags 삭제 (재온보딩 케이스)
     userPrefTagRepository.deleteByUser(user);
 
-    // 선택한 이미지들의 태그 가져오기
-    List<ImageDraweTag> selectedTags = imageDraweTagRepository.findByImageIdIn(selectedImageIds);
-
     // 태그별 빈도 카운트 (선택된 횟수가 곧 weight)
     Map<Axis, Map<String, Integer>> tagCounts = new HashMap<>();
     tagCounts.put(Axis.AXIS_TECHNIQUE, new HashMap<>());
     tagCounts.put(Axis.AXIS_SUBJECT, new HashMap<>());
     tagCounts.put(Axis.AXIS_MOOD, new HashMap<>());
 
+    // 선택한 이미지들의 태그 가져오기
+    List<ImageDraweTag> selectedTags = imageDraweTagRepository.findByImageIdIn(selectedImageIds);
     for (ImageDraweTag tag : selectedTags) {
       countTag(tagCounts.get(Axis.AXIS_TECHNIQUE), tag.getTechnique());
       countTag(tagCounts.get(Axis.AXIS_SUBJECT), tag.getSubject());
@@ -109,16 +110,26 @@ public class OnboardingService {
   }
 
   private void countTag(Map<String, Integer> counter, String value) {
-    if (value == null || value.isBlank()) return;
+    if (value == null || value.isBlank()) {
+      return;
+    }
     counter.merge(value, 1, Integer::sum);
   }
 
   private String buildLabel(ImageDraweTag tag) {
-    if (tag == null) return "이미지";
+    if (tag == null) {
+      return "이미지";
+    }
     List<String> parts = new ArrayList<>();
-    if (tag.getTechnique() != null) parts.add(tag.getTechnique());
-    if (tag.getSubject() != null) parts.add(tag.getSubject());
-    if (tag.getMood() != null) parts.add(tag.getMood());
+    if (tag.getTechnique() != null) {
+      parts.add(tag.getTechnique());
+    }
+    if (tag.getSubject() != null) {
+      parts.add(tag.getSubject());
+    }
+    if (tag.getMood() != null) {
+      parts.add(tag.getMood());
+    }
     return parts.isEmpty() ? "이미지" : String.join(" · ", parts);
   }
 }

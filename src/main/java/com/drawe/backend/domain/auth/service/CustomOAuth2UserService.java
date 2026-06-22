@@ -69,7 +69,9 @@ public class CustomOAuth2UserService implements OAuth2UserService<OAuth2UserRequ
   }
 
   private String maskEmail(String email) {
-    if (email == null || !email.contains("@")) return "***";
+    if (email == null || !email.contains("@")) {
+      return "***";
+    }
     int at = email.indexOf("@");
     return email.charAt(0) + "***" + email.substring(at);
   }

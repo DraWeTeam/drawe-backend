@@ -17,6 +17,5 @@ llm.claude.model=claude-sonnet-4-6
 llm.claude.base-url=https://api.anthropic.com/v1
 
 # 공통 옵션
-llm.timeout-ms=60000
 llm.max-history=20
 llm.default-provider=gemini
