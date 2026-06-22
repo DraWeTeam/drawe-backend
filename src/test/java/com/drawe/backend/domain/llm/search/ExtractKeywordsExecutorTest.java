@@ -1,0 +1,78 @@
+package com.drawe.backend.domain.llm.search;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
+
+import com.drawe.backend.domain.llm.contract.StepContext;
+import com.drawe.backend.domain.llm.contract.StepType;
+import java.util.List;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Test;
+
+/**
+ * ExtractKeywordsExecutor 단위 테스트.
+ *
+ * <p>본 추출 로직은 {@link KomoranKeywordExtractorTest} 에서 검증. 여기는 wrap 의 책임 — 위임 + StepContext 조작만.
+ */
+class ExtractKeywordsExecutorTest {
+
+  /** StepContext 빌더 헬퍼 — 12개 필드를 매번 채우는 보일러플레이트 압축. */
+  private StepContext newCtx(String cleanedMessage) {
+    return new StepContext(
+        1L, // userId
+        1L, // projectId
+        "session-1", // sessionId
+        null, // rawMessage
+        cleanedMessage, // cleanedMessage
+        null, // intent
+        null, // uploadedImageUrl
+        null, // previousReferences
+        null, // keywords
+        null, // references
+        null, // generatedImage
+        null // composedAnswer
+        );
+  }
+
+  @Test
+  @DisplayName("type() = EXTRACT_KEYWORDS")
+  void typeIsExtractKeywords() {
+    var extractor = mock(KomoranKeywordExtractor.class);
+    var sut = new ExtractKeywordsExecutor(extractor);
+
+    assertThat(sut.type()).isEqualTo(StepType.EXTRACT_KEYWORDS);
+  }
+
+  @Test
+  @DisplayName("execute() — cleanedMessage 위임 + keywords 채움")
+  void delegatesToExtractor() {
+    var extractor = mock(KomoranKeywordExtractor.class);
+    when(extractor.extract(eq("수채화 풍경"))).thenReturn(List.of("watercolor", "landscape"));
+
+    var sut = new ExtractKeywordsExecutor(extractor);
+
+    StepContext result = sut.execute(newCtx("수채화 풍경"));
+
+    verify(extractor).extract("수채화 풍경");
+    assertThat(result.keywords()).containsExactly("watercolor", "landscape");
+    // 다른 필드 보존
+    assertThat(result.cleanedMessage()).isEqualTo("수채화 풍경");
+    assertThat(result.userId()).isEqualTo(1L);
+  }
+
+  @Test
+  @DisplayName("execute() — extractor 가 빈 리스트 반환 시 그대로 전달")
+  void emptyKeywords() {
+    var extractor = mock(KomoranKeywordExtractor.class);
+    when(extractor.extract(eq("고마워"))).thenReturn(List.of());
+
+    var sut = new ExtractKeywordsExecutor(extractor);
+
+    StepContext result = sut.execute(newCtx("고마워"));
+
+    assertThat(result.keywords()).isEmpty();
+  }
+}
