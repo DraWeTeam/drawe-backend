@@ -26,10 +26,14 @@ public final class IntentRouting {
     // util class
   }
 
+  /** 미매핑 의도의 안전 기본값 — 단순 답변 생성만. */
+  private static final List<StepType> DEFAULT_STEPS = List.of(COMPOSE);
+
   /**
    * 의도 → step 시퀀스.
    *
-   * <p>키 누락 시 안전 기본값: {@code List.of(COMPOSE)} (단순 답변 생성).
+   * <p>직접 키 lookup 대신 {@link #getSteps(IntentCode)} 를 사용하면 미매핑 의도(예: 아직 미배선인 011~013)에 안전 기본값이
+   * 적용된다. {@code Map} 자체는 기본값 메커니즘이 없으므로 직접 참조는 {@code null} 을 돌려줄 수 있다.
    */
   public static final Map<IntentCode, List<StepType>> ROUTING =
       Map.ofEntries(
@@ -53,4 +57,12 @@ public final class IntentRouting {
 
           // 011~013 은 베타 후 빈도 확인 후 추가
           );
+
+  /**
+   * 의도에 대응하는 step 시퀀스. 매핑이 없는 의도(아직 미배선인 011~013 {@code LEARNING_PATH}/{@code FOLLOWUP}/{@code
+   * COMPARE} 등)는 안전 기본값 {@link #DEFAULT_STEPS} ({@code List.of(COMPOSE)}) 로 폴백한다.
+   */
+  public static List<StepType> getSteps(IntentCode code) {
+    return ROUTING.getOrDefault(code, DEFAULT_STEPS);
+  }
 }

@@ -32,17 +32,11 @@ public class NoopKeywordExtractorFallback {
         "KeywordExtractorFallback 구현체가 없어 Noop 사용 — LLM 폴백 비활성. "
             + "실제 Grok 연결 시 GrokKeywordExtractorFallback 등록 필요.");
     return cleanedMessage -> {
+      // PII 보호: 사용자 입력 원문은 로그에 남기지 않고 길이만 기록.
       log.warn(
-          "Fallback called but not configured. Returning empty for: '{}'",
-          truncate(cleanedMessage, 50));
+          "Fallback called but not configured — returning empty. message_length={}",
+          cleanedMessage == null ? 0 : cleanedMessage.length());
       return List.of();
     };
-  }
-
-  private static String truncate(String s, int maxLen) {
-    if (s == null) {
-      return "";
-    }
-    return s.length() <= maxLen ? s : s.substring(0, maxLen) + "...";
   }
 }

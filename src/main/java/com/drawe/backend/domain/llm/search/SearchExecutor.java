@@ -94,7 +94,7 @@ public class SearchExecutor implements StepExecutor {
         index,
         r.url(),
         r.photographerName(),
-        BigDecimal.valueOf(r.score().doubleValue()),
+        r.score() == null ? BigDecimal.ZERO : BigDecimal.valueOf(r.score().doubleValue()),
         collectTags(r));
   }
 

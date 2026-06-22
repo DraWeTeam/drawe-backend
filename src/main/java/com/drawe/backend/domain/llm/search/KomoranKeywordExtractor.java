@@ -126,6 +126,11 @@ public class KomoranKeywordExtractor {
 
     File tempFile = File.createTempFile("komoran-user-dic", ".txt");
     tempFile.deleteOnExit();
+    // 보안: 임시 파일 권한을 소유자 전용으로 제한 (기본 권한이 그룹/기타에 열려 있을 수 있음).
+    tempFile.setReadable(false, false);
+    tempFile.setReadable(true, true);
+    tempFile.setWritable(false, false);
+    tempFile.setWritable(true, true);
 
     try (InputStream is = resource.getInputStream()) {
       Files.copy(is, tempFile.toPath(), StandardCopyOption.REPLACE_EXISTING);
