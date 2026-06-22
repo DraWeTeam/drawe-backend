@@ -35,7 +35,7 @@ import org.springframework.stereotype.Component;
  *   cleanedMessage
  *      ↓ Komoran 형태소 분석
  *   Token 리스트
- *      ↓ [필터1] CONTENT_TAGS
+ *      ↓ [필터1] CONTENT_TAGS (+ 'X하다' 무드 형용사 어근 XR+XSA 조건부 — {@link #isContentStem})
  *      ↓ [필터2] STOPWORDS 제거
  *      ↓ [필터3] 사전 매핑 → metric: drawe.dict.lookup
  *   hits / misses
@@ -60,7 +60,10 @@ public class KomoranKeywordExtractor {
 
   private static final String USER_DIC_RESOURCE = "komoran-user-dic.txt";
 
-  /** 검색 키워드 후보 품사. */
+  /**
+   * 검색 키워드 후보 품사. 이 외에 'X하다/X스럽다' 묘사 형용사 어근(XR + 뒤따르는 XSA)도 {@link #isContentStem} 에서 추가로 추출한다 —
+   * '따뜻/XR + 하/XSA'(warm) 같은 무드 형용사.
+   */
   private static final Set<String> CONTENT_TAGS = Set.of("NNG", "NNP", "VV", "VA");
 
   /** 의미 없는 흔한 단어 — 사전 매핑 전에 제거. */
@@ -87,10 +90,14 @@ public class KomoranKeywordExtractor {
           "번",
           // 검색/생성 요청 메타동사 — 시각 키워드가 아니라 노이즈. 어간에 남으면 사전 미스율을
           // 부풀려 불필요한 LLM 폴백을 유발한다. 예: "고양이 찾아줘" → 찾 제거 → [cat] (폴백 X).
-          // 주의: "그리"(그리다=draw)는 그림 스타일 키워드로 유효하므로 제외하지 않는다.
+          // "그리/그려/그렸"(그리다=draw)도 요청 동사라 제외 — '주요 키워드만 추출' 방침(2026-06-15).
+          // 명사 "그림"(그림/NNG)은 별개 형태소라 영향 없음(user-dic 에 NNG 등록됨). 오분석형 "그렇"은 위에 이미 포함.
           "찾",
           "만들",
-          "원하");
+          "원하",
+          "그리",
+          "그려",
+          "그렸");
 
   /** 사전 미스율 임계 — 이 비율 초과 시 LLM 폴백 발동. */
   private static final double LLM_FALLBACK_THRESHOLD = 0.30;
@@ -200,14 +207,36 @@ public class KomoranKeywordExtractor {
     return extractTimer.record(() -> doExtract(cleanedMessage));
   }
 
+  /**
+   * 검색 키워드 후보 어간인지 판정. 기본은 {@link #CONTENT_TAGS}(NNG/NNP/VV/VA). 추가로 'X하다/X스럽다' 묘사 형용사의 어근(XR)은
+   * <b>바로 뒤에 형용사 파생 접미사(XSA)가 올 때만</b> 포함한다 — '따뜻/XR + 하/XSA'(warm)·'화사/XR + 하/XSA'(bright) 같은 무드
+   * 형용사를 잡되, XR 단독이나 동사 파생('운동하다'의 하/XSV) 등 비형용사 노이즈는 배제한다(정교 추출). X 가 NNG 인 'X하다'는 어차피 NNG 로 따로
+   * 잡히므로 영향 없다.
+   */
+  private static boolean isContentStem(Token token, int idx, List<Token> tokens) {
+    String pos = token.getPos();
+    if (CONTENT_TAGS.contains(pos)) {
+      return true;
+    }
+    return "XR".equals(pos)
+        && idx + 1 < tokens.size()
+        && "XSA".equals(tokens.get(idx + 1).getPos());
+  }
+
   private List<String> doExtract(String cleanedMessage) {
-    // 1~2. 품사 필터 + 스톱워드 제거 → 어간 후보
-    List<String> stems =
-        analyze(cleanedMessage).stream()
-            .filter(token -> CONTENT_TAGS.contains(token.getPos()))
-            .map(Token::getMorph)
-            .filter(stem -> !STOPWORDS.contains(stem))
-            .toList();
+    // 1~2. 품사 필터(+ XR+XSA 무드 형용사) + 스톱워드 제거 → 어간 후보
+    List<Token> tokens = analyze(cleanedMessage);
+    List<String> stems = new ArrayList<>();
+    for (int i = 0; i < tokens.size(); i++) {
+      Token token = tokens.get(i);
+      if (!isContentStem(token, i, tokens)) {
+        continue;
+      }
+      String morph = token.getMorph();
+      if (!STOPWORDS.contains(morph)) {
+        stems.add(morph);
+      }
+    }
 
     if (stems.isEmpty()) {
       log.debug("No stems after filter for message: '{}'", cleanedMessage);

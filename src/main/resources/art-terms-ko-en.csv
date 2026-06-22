@@ -81,6 +81,21 @@ ko,en,category
 초록,green,color
 검,black,color
 하얗,white,color
+# 색 동의어 (같은 색 다른 어간/표기 — KomoranPoc 실측: 흰=희/VA, 흰색=NNG, 까만=까맣/VA)
+희,white,color
+흰색,white,color
+까맣,black,color
+검정,black,color
+검정색,black,color
+# 'X색' 색 명사형 — Komoran이 한 NNG 토큰으로 인식(검은/하얀 등 VA 어간과 별개라 따로 등록)
+검은색,black,color
+하얀색,white,color
+빨간색,red,color
+파란색,blue,color
+노란색,yellow,color
+초록색,green,color
+분홍색,pink,color
+주황색,orange,color
 
 # === [8] 계절·시간 (time) ===
 봄,spring,time
@@ -93,7 +108,7 @@ ko,en,category
 황혼,twilight,time
 
 # === [9] 동작·액션 (action) — 동사 어간 ===
-그리,drawing,action
+# 그리/그려/그렸(그리다=draw 요청 동사)는 사전에서 제거 + STOPWORDS 처리 — 요청 메타동사(찾/만들/원하와 동일), 주요 키워드 아님. 명사 '그림'은 아래 [12]에 유지.
 달리,running,action
 뛰,jumping,action
 걷,walking,action
@@ -114,3 +129,185 @@ ko,en,category
 # === [12] 그림 일반 (general) ===
 그림,drawing,general
 포즈,pose,general
+
+# ============================================================
+# === 확장 배치 (2026-06-15) — 캐릭터 드로잉 중심 + 베타 발화 기반 ===
+# 명사 위주. 애매하면 개별 제거 가능. 무드 형용사 어간은 Komoran 검증 후 별도 추가 예정.
+# ============================================================
+
+# --- [A] 인체·신체 부위 (anatomy) — 캐릭터 드로잉 핵심 ---
+손,hand,anatomy
+발,foot,anatomy
+팔,arm,anatomy
+다리,leg,anatomy
+머리,head,anatomy
+목,neck,anatomy
+어깨,shoulder,anatomy
+허리,waist,anatomy
+가슴,chest,anatomy
+무릎,knee,anatomy
+손가락,finger,anatomy
+손목,wrist,anatomy
+발목,ankle,anatomy
+팔꿈치,elbow,anatomy
+
+# --- [B] 얼굴 부위 (face) — 표정·이목구비 ---
+# '눈'(eye/snow 동음이의)은 일부러 사전에서 제외 — 문맥 의존이라 LLM 폴백이 문맥 보고 판단하게 둠.
+# eye 의미는 비모호 어휘(눈동자/눈썹/속눈썹)로, snow 의미는 눈사람/눈송이(아래 자연요소)로만 매핑.
+코,nose,face
+입,mouth,face
+귀,ear,face
+입술,lips,face
+눈썹,eyebrow,face
+속눈썹,eyelashes,face
+눈동자,pupil,face
+볼,cheek,face
+턱,jaw,face
+이마,forehead,face
+
+# --- [C] 머리카락·헤어 (hair) ---
+머리카락,hair,hair
+앞머리,bangs,hair
+단발,short hair,hair
+장발,long hair,hair
+곱슬머리,curly hair,hair
+생머리,straight hair,hair
+포니테일,ponytail,hair
+백발,white hair,hair
+금발,blonde hair,hair
+흑발,black hair,hair
+
+# --- [D] 의상·소품 (clothing) ---
+옷,clothes,clothing
+드레스,dress,clothing
+원피스,one piece dress,clothing
+교복,school uniform,clothing
+후드티,hoodie,clothing
+코트,coat,clothing
+셔츠,shirt,clothing
+치마,skirt,clothing
+바지,pants,clothing
+모자,hat,clothing
+안경,glasses,clothing
+신발,shoes,clothing
+한복,hanbok,clothing
+정장,suit,clothing
+
+# --- [E] 포즈·구도 (pose/composition) — 캐릭터 ---
+전신,full body,pose
+반신,half body,pose
+상반신,upper body,pose
+정면,front view,pose
+옆모습,side view,pose
+뒷모습,back view,pose
+기대,leaning,pose
+팔짱,arms crossed,pose
+클로즈업,close-up,pose
+
+# --- [F] 표정 (expression) ---
+미소,smile,expression
+윙크,wink,expression
+무표정,expressionless,expression
+화남,angry expression,expression
+놀라,surprised expression,expression
+
+# --- [G] 캐릭터 유형 (character) ---
+소녀,girl,character
+소년,boy,character
+커플,couple,character
+아기,baby,character
+청년,young man,character
+노인,elderly person,character
+요정,fairy,character
+마법사,wizard,character
+기사,knight,character
+
+# --- [H] 동물 (animal) — 추가 ---
+토끼,rabbit,animal
+리트리버,retriever,animal
+골든리트리버,golden retriever,animal
+곰,bear,animal
+여우,fox,animal
+사슴,deer,animal
+판다,panda,animal
+호랑이,tiger,animal
+용,dragon,animal
+
+# --- [I] 배경·장소 (scene) — 베타 발화 기반 ---
+배경,background,scene
+공원,park,scene
+카페,cafe,scene
+거리,street,scene
+실내,indoor,scene
+교실,classroom,scene
+방,room,scene
+해변,beach,scene
+골목,alley,scene
+풀밭,grass field,scene
+설원,snowy field,scene
+자연,nature,scene
+
+# --- [J] 사물·음식 (object) — 베타 발화 기반 ---
+커피,coffee,object
+컵,cup,object
+소파,sofa,object
+의자,chair,object
+책,book,object
+우산,umbrella,object
+햄버거,hamburger,object
+스파게티,spaghetti,object
+케이크,cake,object
+
+# --- [K] 자연 요소 (nature) — 베타 발화 기반 ---
+눈사람,snowman,nature
+눈송이,snowflake,nature
+무지개,rainbow,nature
+별,star,nature
+달,moon,nature
+태양,sun,nature
+잎,leaf,nature
+꽃잎,petal,nature
+파도,wave,nature
+
+# --- [L] 색·개념 추가 ---
+색상,color,color
+주황,orange,color
+보라색,purple,color
+분홍,pink,color
+갈색,brown,color
+회색,gray,color
+확대,zoom in,concept
+
+# --- [M] 무드 형용사 (mood) — Komoran 어간 실측(KomoranPoc) 검증분 ---
+# VA/NNG 어간 (그대로 추출됨)
+차갑,cold,mood
+신비롭,mysterious,mood
+몽환,dreamy,mood
+# 'X하다' 무드 어근(XR) — 추출기 isContentStem 의 XR+XSA 조건부 추출로 매핑됨
+따뜻,warm,mood
+웅장,grand,mood
+포근,cozy,mood
+은은,soft,mood
+화사,bright,mood
+쓸쓸,lonely,mood
+차분,calm,mood
+강렬,intense,mood
+잔잔,serene,mood
+시원,refreshing,mood
+
+# === [N] 묘사 형용사 (descriptive) — KomoranPoc 실측 어간. 화려/단순/정교는 XR(+XSA로 추출) ===
+# 동음이의 위험으로 제외: 길(long=길/NNG 도로)
+크,big,descriptive
+작,small,descriptive
+둥글,round,descriptive
+짧,short,descriptive
+귀엽,cute,descriptive
+예쁘,pretty,descriptive
+멋지,cool,descriptive
+밝,bright,descriptive
+어둡,dark,descriptive
+부드럽,soft,descriptive
+# 거칠(rough) 제외: Komoran이 '거친'을 거치다(pass)/VV로 오분석해 매핑 불가(死엔트리)
+화려,gorgeous,descriptive
+단순,simple,descriptive
+정교,detailed,descriptive
