@@ -26,7 +26,9 @@ public class CritiqueUploadExecutor implements StepExecutor {
   @Override
   public StepContext execute(StepContext ctx) {
     // 골격: 멀티모달 비평 미구현(S3'). 컨텍스트 통과.
-    log.debug("CRITIQUE_UPLOAD 골격 — 미구현, 컨텍스트 통과");
+    // 뒤에 COMPOSE 가 있어 500 은 안 나지만(비평 컨텍스트만 누락된 채 응답), 이 골격이 실행됐다 =
+    // SELF_CRITIQUE 가 live 도달했다는 신호라 WARN 으로 남긴다(조용한 품질 저하 방지).
+    log.warn("CRITIQUE_UPLOAD 골격 실행됨 — 멀티모달 비평 미구현. 비평 컨텍스트 없이 COMPOSE 진행됨.");
     return ctx;
   }
 }

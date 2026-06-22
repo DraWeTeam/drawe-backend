@@ -75,6 +75,16 @@ dependencies {
     implementation 'io.github.resilience4j:resilience4j-spring-boot3:2.2.0'
     implementation 'org.springframework.boot:spring-boot-starter-aop'
 
+    // ── AWS S3 — AI 이미지 영구 저장 (presigned URL 서빙) ──────
+    // BOM 으로 버전 일원화. s3 모듈에 S3Client·S3Presigner 둘 다 포함.
+    // 기본 프로파일은 DbImageStorage(MySQL) 유지, s3 프로파일에서만 S3 빈 활성화.
+    implementation platform('software.amazon.awssdk:bom:2.46.7')
+    implementation 'software.amazon.awssdk:s3'
+    // 동기 S3Client 는 HTTP 클라이언트 구현체가 별도로 필요하다(s3 아티팩트가 자동으로 안 끌고 옴).
+    // 없으면 런타임에 Apache HC5(TlsSocketStrategy) 를 찾다 NoClassDefFoundError 로 S3Client 생성 실패.
+    // PutObject + presigned URL 용도엔 JDK HttpURLConnection 기반 url-connection-client 가 가볍고 충분.
+    implementation 'software.amazon.awssdk:url-connection-client'
+
     // ── Flyway — DB schema migration ─────────────────────────
     // prod 에서는 JPA_DDL_AUTO=validate 로 Hibernate 가 스키마 만들지 않음.
     // Flyway 가 src/main/resources/db/migration/V*.sql 을 순차 적용.

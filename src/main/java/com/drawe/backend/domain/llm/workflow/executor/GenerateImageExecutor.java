@@ -32,7 +32,9 @@ public class GenerateImageExecutor implements StepExecutor {
       return ctx;
     }
     // 골격: ImageGenerationService 위임 미이관. 컨텍스트 통과.
-    log.debug("GENERATE_IMAGE 골격 — 생성 미이관, 컨텍스트 통과");
+    // 이 골격이 실제 실행됐다 = 미구현 의도(GENERATE)가 live 워크플로에 도달했다는 신호(R1).
+    // 정상 경로면 WorkflowComposeProperties 부팅 검증이 막으므로, WARN 이 찍히면 라우팅/게이트 회귀다.
+    log.warn("GENERATE_IMAGE 골격 실행됨 — 생성 미이관(미구현 의도가 live 도달). composedOutput=null→500 위험 신호.");
     return ctx;
   }
 }

@@ -26,22 +26,21 @@ import org.junit.jupiter.api.Test;
  */
 class SearchExecutorTest {
 
-  /** StepContext 헬퍼 — keywords 채워서 만들기. */
+  /**
+   * StepContext 헬퍼 — keywords 채워서 만들기. start() 팩토리 + withKeywords 로 압축해 record 필드가 더 늘어도 안 깨지게 한다.
+   * (withKeywords 는 null 도 그대로 보존 — keywords null 케이스 검증용.)
+   */
   private StepContext newCtxWithKeywords(List<String> keywords) {
-    return new StepContext(
-        1L,
-        1L,
-        "session-1",
-        null, // rawMessage
-        "테스트 메시지", // cleanedMessage
-        null, // intent
-        null, // uploadedImageUrl
-        null, // previousReferences
-        keywords, // keywords ⭐
-        null, // references
-        null, // generatedImage
-        null // composedAnswer
-        );
+    return StepContext.start(
+            1L,
+            1L,
+            "session-1",
+            null, // rawMessage
+            "테스트 메시지", // cleanedMessage
+            null, // intent
+            null, // uploadedImageUrl
+            null) // previousReferences
+        .withKeywords(keywords);
   }
 
   /** ImageResult 13개 필드를 매번 채우는 보일러플레이트 압축. */
@@ -145,6 +144,100 @@ class SearchExecutorTest {
     // tags 합산 (technique + subject + mood) — null 필터
     assertThat(refs.get(0).tags()).containsExactly("watercolor", "landscape", "calm");
     assertThat(refs.get(1).tags()).containsExactly("watercolor", "mountain");
+  }
+
+  @Test
+  @DisplayName("execute() — 표시필드(photographerUsername·technique·subject·mood·source) 복원")
+  void restoresDisplayFields() {
+    var searchService = mock(SearchService.class);
+    ImageResult r =
+        newImageResult(
+            1L, "https://example.com/1.jpg", "Alice", 0.9f, "watercolor", "landscape", "calm");
+    when(searchService.search(any(SearchRequest.class)))
+        .thenReturn(new SearchResponse(List.of(r), 1, "watercolor"));
+    var sut = new SearchExecutor(searchService);
+
+    ReferenceImage ref = sut.execute(newCtxWithKeywords(List.of("watercolor"))).references().get(0);
+
+    assertThat(ref.photographerUsername()).isEqualTo("user-1");
+    assertThat(ref.technique()).isEqualTo("watercolor");
+    assertThat(ref.subject()).isEqualTo("landscape");
+    assertThat(ref.mood()).isEqualTo("calm");
+    assertThat(ref.source()).isEqualTo("pexels");
+  }
+
+  @Test
+  @DisplayName("점수가드 — avg<0.2 || max<0.21 이면 references 차단 + searchStats.blocked=low_score")
+  void scoreGuardBlocksLowScore() {
+    var searchService = mock(SearchService.class);
+    // 점수 전부 낮음: avg≈0.1, max=0.12 → 차단
+    ImageResult r1 = newImageResult(1L, "u1", "A", 0.10f, "t", "s", "m");
+    ImageResult r2 = newImageResult(2L, "u2", "B", 0.12f, "t", "s", "m");
+    when(searchService.search(any(SearchRequest.class)))
+        .thenReturn(new SearchResponse(List.of(r1, r2), 2, "kw"));
+    var sut = new SearchExecutor(searchService);
+
+    StepContext result = sut.execute(newCtxWithKeywords(List.of("kw")));
+
+    // 차단 → references 빔
+    assertThat(result.references()).isEmpty();
+    // searchStats 는 통계·차단판정을 운반
+    assertThat(result.searchStats()).isNotNull();
+    assertThat(result.searchStats().blocked()).isTrue();
+    assertThat(result.searchStats().blockedReason()).isEqualTo("low_score");
+    assertThat(result.searchStats().resultCount()).isEqualTo(2);
+    assertThat(result.searchStats().imageIds()).containsExactly(1L, 2L);
+  }
+
+  @Test
+  @DisplayName("점수가드 — 점수 충분하면 통과 + searchStats.blocked=false")
+  void scoreGuardPassesHighScore() {
+    var searchService = mock(SearchService.class);
+    ImageResult r = newImageResult(1L, "u1", "A", 0.5f, "t", "s", "m");
+    when(searchService.search(any(SearchRequest.class)))
+        .thenReturn(new SearchResponse(List.of(r), 1, "kw"));
+    var sut = new SearchExecutor(searchService);
+
+    StepContext result = sut.execute(newCtxWithKeywords(List.of("kw")));
+
+    assertThat(result.references()).hasSize(1);
+    assertThat(result.searchStats().blocked()).isFalse();
+    assertThat(result.searchStats().blockedReason()).isNull();
+  }
+
+  @Test
+  @DisplayName("점수가드 — 검색 결과 0건도 차단(low_score) — 레거시 동등")
+  void scoreGuardBlocksEmptyResults() {
+    var searchService = mock(SearchService.class);
+    when(searchService.search(any(SearchRequest.class)))
+        .thenReturn(new SearchResponse(List.of(), 0, "kw"));
+    var sut = new SearchExecutor(searchService);
+
+    StepContext result = sut.execute(newCtxWithKeywords(List.of("kw")));
+
+    // 결과 0건 → avg=max=0.0 → 0<0.2 충족 → blocked(low_score). 과거엔 EXECUTED 로 새던 케이스.
+    assertThat(result.references()).isEmpty();
+    assertThat(result.searchStats().blocked()).isTrue();
+    assertThat(result.searchStats().blockedReason()).isEqualTo("low_score");
+    assertThat(result.searchStats().resultCount()).isZero();
+  }
+
+  @Test
+  @DisplayName("검색 예외 — 삼키고 빈 references + searchStats.blocked=exception(error_class 운반)")
+  void searchExceptionBlocksWithExceptionReason() {
+    var searchService = mock(SearchService.class);
+    when(searchService.search(any(SearchRequest.class)))
+        .thenThrow(new IllegalStateException("pinecone down"));
+    var sut = new SearchExecutor(searchService);
+
+    StepContext result = sut.execute(newCtxWithKeywords(List.of("kw")));
+
+    // 예외를 던지지 않고(워크플로 중단 방지) 빈 references 로 진행 — 레거시 catch 와 동등.
+    assertThat(result.references()).isEmpty();
+    assertThat(result.searchStats()).isNotNull();
+    assertThat(result.searchStats().blocked()).isTrue();
+    assertThat(result.searchStats().blockedReason()).isEqualTo("exception");
+    assertThat(result.searchStats().errorClass()).isEqualTo("IllegalStateException");
   }
 
   @Test

@@ -95,14 +95,35 @@ public class AiImageIndexService {
     }
   }
 
+  /**
+   * 일반(Bria) AI 이미지의 Pinecone 메타 출처값. 코랩 Unsplash 시드와 구분한다.
+   *
+   * <p>가이드용(FastAPI+Gemini) 이미지는 별도 namespace 로 분리 적재하되, 같은 메타 키({@code image_source})에 다른 출처값을 넣어
+   * namespace 안에서도 출처를 식별할 수 있게 한다. 가이드 출처값· 적재 경로는 가이드 FastAPI 스키마 확정 시 추가. 설계: {@code
+   * docs/decisions/S3-guide-namespace-design.md}.
+   */
+  static final String SOURCE_AI_GENERATED = "AI_GENERATED";
+
   private Map<String, Object> buildMetadata(Image image, Project project) {
-    // 코랩 시드 노트북 컨벤션과 동일한 키 사용:
-    // - image_source: "AI_GENERATED" (Unsplash 시드와 출처 구분)
-    // - ai_subject/ai_technique/ai_mood: List<String> (시드의 동일 키와 충돌 방지용 ai_ 프리픽스)
-    // - generation_prompt: AI 이미지는 원본 keywords가 없으므로 프롬프트 저장
-    // null/빈 값은 키 자체를 제외한다.
+    return buildMetadata(image, project, SOURCE_AI_GENERATED);
+  }
+
+  /**
+   * Pinecone 메타 구성. {@code imageSource} 로 출처(일반 vs 가이드)를 주입받는다.
+   *
+   * <p>코랩 시드 노트북 컨벤션과 동일한 키 사용:
+   *
+   * <ul>
+   *   <li>image_source: 출처 구분 (일반={@link #SOURCE_AI_GENERATED}, Unsplash 시드와 구분)
+   *   <li>ai_subject/ai_technique/ai_mood: List&lt;String&gt; (시드 동일 키와 충돌 방지용 ai_ 프리픽스)
+   *   <li>generation_prompt: AI 이미지는 원본 keywords가 없으므로 프롬프트 저장
+   * </ul>
+   *
+   * <p>null/빈 값은 키 자체를 제외한다.
+   */
+  private Map<String, Object> buildMetadata(Image image, Project project, String imageSource) {
     Map<String, Object> m = new HashMap<>();
-    m.put("image_source", "AI_GENERATED");
+    m.put("image_source", imageSource);
     if (image.getCreatedBy() != null && image.getCreatedBy().getId() != null) {
       m.put("createdByUserId", image.getCreatedBy().getId());
     }

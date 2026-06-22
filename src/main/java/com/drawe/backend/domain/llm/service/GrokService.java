@@ -105,8 +105,60 @@ public class GrokService implements LlmService {
     Map<String, Object> body = new HashMap<>();
     body.put("model", model);
     body.put("messages", messages);
+
+    // Structured Output 강제 (S2' Phase 3). responseSchemaName 이 지정된 호출(COMPOSE)만 네이티브
+    // json_schema 모드로. 미지정(TRANSLATE·KeywordExtractor 등)은 기존대로 평문. 알 수 없는 이름은
+    // 평문 폴백 — strict 거부로 응답을 깨뜨리느니 안전하게(설계 §4.3).
+    Map<String, Object> responseFormat = responseFormatFor(context.responseSchemaName());
+    if (responseFormat != null) {
+      body.put("response_format", responseFormat);
+    }
     return body;
   }
+
+  /**
+   * 스키마 이름 → OpenAI 호환 {@code response_format} 매핑. 현재는 COMPOSE 가이드 응답 스키마 1종. null/blank/미등록 이름은
+   * {@code null} 반환(평문). 순수 함수 — 테스트 용이성을 위해 분리.
+   */
+  static Map<String, Object> responseFormatFor(String schemaName) {
+    if (schemaName == null || schemaName.isBlank()) {
+      return null;
+    }
+    if (DRAW_GUIDE_SCHEMA_NAME.equals(schemaName)) {
+      return Map.of(
+          "type",
+          "json_schema",
+          "json_schema",
+          Map.of("name", DRAW_GUIDE_SCHEMA_NAME, "strict", true, "schema", DRAW_GUIDE_SCHEMA));
+    }
+    log.warn("알 수 없는 responseSchemaName='{}' — 평문으로 폴백", schemaName);
+    return null;
+  }
+
+  /** COMPOSE 가이드 응답 스키마 이름 — {@code LlmCallContext.responseSchemaName} 과 매칭. */
+  public static final String DRAW_GUIDE_SCHEMA_NAME = "draw_guide_response";
+
+  /**
+   * COMPOSE 가이드 응답 스키마(설계 §4.1). message=본문, citations=인용한 references 1-based 인덱스,
+   * offer_generate=자료 부족 시 생성 제안(LLM 의견; 최종 노출은 시스템이 결정).
+   *
+   * <p><b>strict 규칙</b>: xAI/OpenAI 호환 {@code strict:true} 는 properties 의 <i>모든</i> 키가 {@code
+   * required} 에 있고 {@code additionalProperties:false} 일 것을 요구한다(스키마 거부 방지). 따라서 offer_generate 도
+   * required 에 포함 — boolean 이라 LLM 이 항상 채워도 부담이 적고, 값 자체는 보조 신호일 뿐.
+   */
+  private static final Map<String, Object> DRAW_GUIDE_SCHEMA =
+      Map.of(
+          "type",
+          "object",
+          "additionalProperties",
+          false,
+          "required",
+          List.of("message", "citations", "offer_generate"),
+          "properties",
+          Map.of(
+              "message", Map.of("type", "string"),
+              "citations", Map.of("type", "array", "items", Map.of("type", "integer")),
+              "offer_generate", Map.of("type", "boolean")));
 
   private String roleName(MessageRole role) {
     return switch (role) {
