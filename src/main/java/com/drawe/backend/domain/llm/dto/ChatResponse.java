@@ -12,7 +12,7 @@ public record ChatResponse(
     String referencesAction,
     boolean offerGenerate,
     String suggestedPrompt,
-    /** GENERATE_NOW 분기에서 바로 생성된 AI 이미지. 그 외 경우 null. */
+    // GENERATE_NOW 분기에서 바로 생성된 AI 이미지. 그 외 경우 null.
     GeneratedImage generatedImage) {
 
   public record ReferenceItem(
@@ -24,7 +24,7 @@ public record ChatResponse(
       String subject,
       String mood,
       Double similarity,
-      /** ImageSource enum name: "UNSPLASH" | "AI". 프론트는 "AI"일 때 생성 이미지 배지를 렌더한다. */
+      // ImageSource enum name: "UNSPLASH" | "AI". 프론트는 "AI"일 때 생성 이미지 배지를 렌더한다.
       String source) {}
 
   /** 사용자의 명시적 "만들어줘" 요청에 응답해 즉시 생성된 이미지. */
