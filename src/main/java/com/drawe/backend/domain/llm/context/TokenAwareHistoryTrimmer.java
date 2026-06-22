@@ -18,13 +18,14 @@ import org.springframework.stereotype.Component;
  * <p>S2' Phase 6 Layer 1. 기존 개수 기반 {@code trimHistory(all, maxNonSystem)} 를 대체한다.
  *
  * <p>흐름:
+ *
  * <ol>
- *   <li>SYSTEM·USER·ASSISTANT 분리</li>
- *   <li>{@link TopicChangeDetector} 로 주제 전환 감지 (v1 Noop = 항상 false)</li>
- *   <li>SYSTEM 은 등록 순으로 SYSTEM_BUDGET 안에서 포함</li>
- *   <li>USER·ASSISTANT 는 {@link HistorySanitizer} 로 [N] 정제 후 최근부터 역순으로
- *       HISTORY_BUDGET 안에서 포함 (주제 전환 시 1/4 로 더 공격적)</li>
- *   <li>{@code drawe.tokens.input}, {@code drawe.history.trimmed} 메트릭 기록</li>
+ *   <li>SYSTEM·USER·ASSISTANT 분리
+ *   <li>{@link TopicChangeDetector} 로 주제 전환 감지 (v1 Noop = 항상 false)
+ *   <li>SYSTEM 은 등록 순으로 SYSTEM_BUDGET 안에서 포함
+ *   <li>USER·ASSISTANT 는 {@link HistorySanitizer} 로 [N] 정제 후 최근부터 역순으로 HISTORY_BUDGET 안에서 포함 (주제 전환
+ *       시 1/4 로 더 공격적)
+ *   <li>{@code drawe.tokens.input}, {@code drawe.history.trimmed} 메트릭 기록
  * </ol>
  *
  * <p>예시 예산 (기본): SYSTEM 1200 / History 4000 / Current 1500 / Total 8000.
@@ -39,6 +40,7 @@ public class TokenAwareHistoryTrimmer {
 
   /** 주제 전환 시 history 예산을 1/4 또는 800 토큰 중 작은 값으로 잘라낸다. */
   private static final int TOPIC_CHANGE_BUDGET_DIVISOR = 4;
+
   private static final int TOPIC_CHANGE_BUDGET_FLOOR = 800;
 
   private final TokenCounter tokenCounter;
@@ -66,12 +68,11 @@ public class TokenAwareHistoryTrimmer {
   /**
    * Turn 목록을 토큰 예산 안에 맞게 trim.
    *
-   * @param allTurns       전체 메시지 (SYSTEM + USER + ASSISTANT 섞임, 시간 오름차순)
+   * @param allTurns 전체 메시지 (SYSTEM + USER + ASSISTANT 섞임, 시간 오름차순)
    * @param currentMessage 새 user 메시지 (예산 계산·topic 감지용)
    * @return trim 된 Turn 목록 (SYSTEM 먼저, USER·ASSISTANT 최근 순)
    */
-  public List<LlmCallContext.Turn> trim(
-      List<LlmCallContext.Turn> allTurns, String currentMessage) {
+  public List<LlmCallContext.Turn> trim(List<LlmCallContext.Turn> allTurns, String currentMessage) {
     if (allTurns == null || allTurns.isEmpty()) {
       return List.of();
     }
@@ -89,11 +90,13 @@ public class TokenAwareHistoryTrimmer {
     String previousUser = lastUserMessage(nonSystems);
     boolean topicChange = topicChangeDetector.isTopicChange(previousUser, currentMessage);
 
-    List<LlmCallContext.Turn> systemTrimmed = trimFromHeadToBudget(systems, budget.getSystemBudget());
+    List<LlmCallContext.Turn> systemTrimmed =
+        trimFromHeadToBudget(systems, budget.getSystemBudget());
 
     int historyBudget =
         topicChange
-            ? Math.min(budget.getHistoryBudget() / TOPIC_CHANGE_BUDGET_DIVISOR, TOPIC_CHANGE_BUDGET_FLOOR)
+            ? Math.min(
+                budget.getHistoryBudget() / TOPIC_CHANGE_BUDGET_DIVISOR, TOPIC_CHANGE_BUDGET_FLOOR)
             : budget.getHistoryBudget();
 
     List<LlmCallContext.Turn> sanitized = historySanitizer.sanitize(nonSystems);
@@ -113,9 +116,12 @@ public class TokenAwareHistoryTrimmer {
 
     log.debug(
         "trim — system={}/{}, history={}/{}, topicChange={}, totalTokens={}",
-        systemTrimmed.size(), systems.size(),
-        historyTrimmed.size(), nonSystems.size(),
-        topicChange, totalTokens);
+        systemTrimmed.size(),
+        systems.size(),
+        historyTrimmed.size(),
+        nonSystems.size(),
+        topicChange,
+        totalTokens);
 
     return result;
   }

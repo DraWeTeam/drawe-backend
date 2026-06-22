@@ -20,14 +20,14 @@ import org.springframework.data.redis.core.StringRedisTemplate;
  * <p>S2' Phase 6 — 단기 메모리 동작 검증. 멀티턴 시나리오를 진짜 Redis 와 상호작용으로 검증.
  *
  * <p>실행 전 조건:
+ *
  * <ul>
- *   <li>로컬 Redis 기동 ({@code redis-cli ping} → PONG)</li>
- *   <li>application.properties 의 Redis 설정이 로컬 가리키도록</li>
+ *   <li>로컬 Redis 기동 ({@code redis-cli ping} → PONG)
+ *   <li>application.properties 의 Redis 설정이 로컬 가리키도록
  * </ul>
  *
- * <p>이 테스트는 MySQL 폴백 시나리오는 검증하지 않음 (Mockito 단위 테스트
- * {@link RedisSessionServiceTest} 에서 검증). 여기선 Redis 와의 진짜 라운드트립 + 멀티턴 흐름
- * 확인이 목적.
+ * <p>이 테스트는 MySQL 폴백 시나리오는 검증하지 않음 (Mockito 단위 테스트 {@link RedisSessionServiceTest} 에서 검증). 여기선
+ * Redis 와의 진짜 라운드트립 + 멀티턴 흐름 확인이 목적.
  */
 @SpringBootTest
 class SessionServiceIntegrationTest {
@@ -113,7 +113,8 @@ class SessionServiceIntegrationTest {
     sessionService.save(turn1);
 
     // 턴 2: KEEP
-    SessionData turn2 = sessionService.getOrRestore(USER_ID, PROJECT_ID, null).withKeep(IntentCode.KEEP);
+    SessionData turn2 =
+        sessionService.getOrRestore(USER_ID, PROJECT_ID, null).withKeep(IntentCode.KEEP);
     sessionService.save(turn2);
 
     // 턴 3: NEW_SEARCH — 단풍으로 전환
@@ -195,6 +196,11 @@ class SessionServiceIntegrationTest {
 
   private ReferenceImage refImage(Long imageId, int index, String tag) {
     return new ReferenceImage(
-        imageId, index, "https://example.com/" + imageId, "photographer", BigDecimal.valueOf(0.8), List.of(tag));
+        imageId,
+        index,
+        "https://example.com/" + imageId,
+        "photographer",
+        BigDecimal.valueOf(0.8),
+        List.of(tag));
   }
 }

@@ -18,14 +18,14 @@ import org.junit.jupiter.api.Test;
 /**
  * 멀티턴 컨텍스트 조립 시나리오 — 세션(상태) + 컨텍스트 레이어(정제·trim)를 함께 검증.
  *
- * <p>실제 라이브 통합(ChatLlmService / A 의 ComposeExecutor)은 공동 작업이라 아직 미배선이다.
- * 본 테스트는 그와 별개로 <b>B 컴포넌트만 묶어</b> "턴을 넘어 LLM 에 갈 컨텍스트가 올바른지"를
- * 솔로로 검증한다 — A 코드·S1 키워드 작업과 무관.
+ * <p>실제 라이브 통합(ChatLlmService / A 의 ComposeExecutor)은 공동 작업이라 아직 미배선이다. 본 테스트는 그와 별개로 <b>B 컴포넌트만
+ * 묶어</b> "턴을 넘어 LLM 에 갈 컨텍스트가 올바른지"를 솔로로 검증한다 — A 코드·S1 키워드 작업과 무관.
  *
  * <p>검증 시나리오:
+ *
  * <ol>
- *   <li>턴1 NEW_SEARCH → 세션에 검색결과(previousReferences) 저장</li>
- *   <li>턴2 KEEP → references 유지 + 직전결과를 SYSTEM 으로 주입 + 히스토리 [N] 정제 + 예산 trim</li>
+ *   <li>턴1 NEW_SEARCH → 세션에 검색결과(previousReferences) 저장
+ *   <li>턴2 KEEP → references 유지 + 직전결과를 SYSTEM 으로 주입 + 히스토리 [N] 정제 + 예산 trim
  * </ol>
  */
 class MultiTurnContextAssemblyTest {
@@ -60,7 +60,11 @@ class MultiTurnContextAssemblyTest {
   private String referenceBlock(List<ReferenceImage> refs) {
     StringBuilder sb = new StringBuilder("[참고 이미지]\n");
     for (ReferenceImage r : refs) {
-      sb.append("[").append(r.index()).append("] ").append(String.join(", ", r.tags())).append("\n");
+      sb.append("[")
+          .append(r.index())
+          .append("] ")
+          .append(String.join(", ", r.tags()))
+          .append("\n");
     }
     return sb.toString();
   }

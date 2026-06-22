@@ -8,12 +8,12 @@ import org.springframework.stereotype.Component;
 /**
  * AI 파이프라인 실시간 메트릭(Micrometer) 기록기.
  *
- * <p>기존 {@code analytics_events}(DB, 사후 SQL 분석) 와 보완 관계 — 이쪽은 prometheus 스크랩용 실시간 메트릭이다. 비즈니스
- * 로직에 {@link MeterRegistry} 를 흩뿌리지 않도록 측정 지점을 이 얇은 래퍼에 모은다. 설계: {@code
+ * <p>기존 {@code analytics_events}(DB, 사후 SQL 분석) 와 보완 관계 — 이쪽은 prometheus 스크랩용 실시간 메트릭이다. 비즈니스 로직에
+ * {@link MeterRegistry} 를 흩뿌리지 않도록 측정 지점을 이 얇은 래퍼에 모은다. 설계: {@code
  * docs/decisions/S1-micrometer-design.md} (ADR §4 메트릭, §8 도구).
  *
- * <p><b>태그 카디널리티 통제</b>: 고카디널리티 값(userId, sessionId, 원문 메시지)은 절대 태그로 쓰지 않는다. 유한 열거값만
- * (rule_id, action, provider, outcome). 시계열 폭발·PII 누설 방지.
+ * <p><b>태그 카디널리티 통제</b>: 고카디널리티 값(userId, sessionId, 원문 메시지)은 절대 태그로 쓰지 않는다. 유한 열거값만 (rule_id,
+ * action, provider, outcome). 시계열 폭발·PII 누설 방지.
  */
 @Component
 public class LlmMetrics {

@@ -20,8 +20,8 @@ import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestClient;
 
 /**
- * Grok(xAI) LLM 클라이언트. connect 3s / read 30s 타임아웃으로 hang 차단(LLM 응답은 본래 느려 read 는 길게). 서킷은
- * 제외 — 실패는 이미 {@code AI_SERVICE_ERROR} 로 변환되어 {@code ChatLlmService} 가 처리. 설계: {@code
+ * Grok(xAI) LLM 클라이언트. connect 3s / read 30s 타임아웃으로 hang 차단(LLM 응답은 본래 느려 read 는 길게). 서킷은 제외 — 실패는
+ * 이미 {@code AI_SERVICE_ERROR} 로 변환되어 {@code ChatLlmService} 가 처리. 설계: {@code
  * docs/decisions/S1-resilience4j-design.md}.
  */
 @Slf4j

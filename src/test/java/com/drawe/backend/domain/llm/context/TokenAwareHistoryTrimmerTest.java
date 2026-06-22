@@ -103,8 +103,7 @@ class TokenAwareHistoryTrimmerTest {
 
     List<LlmCallContext.Turn> result = trimmer.trim(turns, "msg");
 
-    long systemCount =
-        result.stream().filter(t -> t.role() == MessageRole.SYSTEM).count();
+    long systemCount = result.stream().filter(t -> t.role() == MessageRole.SYSTEM).count();
     assertThat(systemCount).isLessThan(10);
   }
 
@@ -123,8 +122,7 @@ class TokenAwareHistoryTrimmerTest {
   @Test
   @DisplayName("입력 토큰 메트릭 기록됨")
   void recordsInputTokensMetric() {
-    List<LlmCallContext.Turn> turns =
-        List.of(new LlmCallContext.Turn(MessageRole.USER, "안녕"));
+    List<LlmCallContext.Turn> turns = List.of(new LlmCallContext.Turn(MessageRole.USER, "안녕"));
 
     trimmer.trim(turns, "현재 메시지");
 

@@ -50,8 +50,7 @@ class RedisSessionServiceTest {
     objectMapper = new ObjectMapper().registerModule(new JavaTimeModule());
     registry = new SimpleMeterRegistry();
 
-    service =
-        new RedisSessionService(redisTemplate, objectMapper, llmMessageRepository, registry);
+    service = new RedisSessionService(redisTemplate, objectMapper, llmMessageRepository, registry);
     service.init();
   }
 
@@ -68,7 +67,11 @@ class RedisSessionServiceTest {
             7L,
             List.of(
                 new ReferenceImage(
-                    123L, 1, "url1", "photographer", java.math.BigDecimal.valueOf(0.85),
+                    123L,
+                    1,
+                    "url1",
+                    "photographer",
+                    java.math.BigDecimal.valueOf(0.85),
                     List.of("수채화"))),
             IntentCode.NEW_SEARCH,
             List.of("watercolor"),
@@ -303,8 +306,7 @@ class RedisSessionServiceTest {
     lastAssistant.setReferences(
         List.of(
             new ChatResponse.ReferenceItem(
-                123L, "url1", "photographer", "username", "수채화", "벚꽃", "부드러움", 0.85,
-                "UNSPLASH")));
+                123L, "url1", "photographer", "username", "수채화", "벚꽃", "부드러움", 0.85, "UNSPLASH")));
     lastAssistant.setCreatedAt(Instant.now());
 
     ChatSession session = mock(ChatSession.class);
@@ -373,8 +375,15 @@ class RedisSessionServiceTest {
     lastAssistant.setReferences(
         List.of(
             new ChatResponse.ReferenceItem(
-                123L, "url1", "photographer", "username", "수채화", "벚꽃", "부드러움",
-                null /* similarity */, "UNSPLASH")));
+                123L,
+                "url1",
+                "photographer",
+                "username",
+                "수채화",
+                "벚꽃",
+                "부드러움",
+                null /* similarity */,
+                "UNSPLASH")));
     lastAssistant.setCreatedAt(Instant.now());
 
     ChatSession session = mock(ChatSession.class);

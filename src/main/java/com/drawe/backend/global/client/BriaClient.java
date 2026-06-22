@@ -16,9 +16,9 @@ import org.springframework.web.client.RestClientResponseException;
 /**
  * Bria 이미지 생성 클라이언트.
  *
- * <p>장애 격리: connect/read 타임아웃만 적용한다({@link HttpClientFactory}). 서킷브레이커는 의도적으로 제외 — Bria 는 자체
- * 폴링(최대 30s)과 에러 처리(HTTP 에러·폴링 실패 → {@code AI_SERVICE_ERROR})가 이미 견고하고, '생성 실패'라는 정상적 비즈니스
- * 결과까지 서킷을 열면 과민하기 때문. 설계: {@code docs/decisions/S1-resilience4j-design.md} §4.
+ * <p>장애 격리: connect/read 타임아웃만 적용한다({@link HttpClientFactory}). 서킷브레이커는 의도적으로 제외 — Bria 는 자체 폴링(최대
+ * 30s)과 에러 처리(HTTP 에러·폴링 실패 → {@code AI_SERVICE_ERROR})가 이미 견고하고, '생성 실패'라는 정상적 비즈니스 결과까지 서킷을 열면
+ * 과민하기 때문. 설계: {@code docs/decisions/S1-resilience4j-design.md} §4.
  */
 @Slf4j
 @Component
@@ -120,22 +120,32 @@ public class BriaClient {
   }
 
   private String extractImageUrl(JsonNode root) {
-    if (root == null) return null;
+    if (root == null) {
+      return null;
+    }
     String direct = root.path("image_url").asText(null);
-    if (direct != null && !direct.isBlank()) return direct;
+    if (direct != null && !direct.isBlank()) {
+      return direct;
+    }
     JsonNode result = root.path("result");
     if (result.isObject()) {
       String fromObj = result.path("image_url").asText(null);
-      if (fromObj != null && !fromObj.isBlank()) return fromObj;
+      if (fromObj != null && !fromObj.isBlank()) {
+        return fromObj;
+      }
     }
     if (result.isArray() && result.size() > 0) {
       JsonNode first = result.get(0);
       String fromArray = first.path("image_url").asText(null);
-      if (fromArray != null && !fromArray.isBlank()) return fromArray;
+      if (fromArray != null && !fromArray.isBlank()) {
+        return fromArray;
+      }
       JsonNode urls = first.path("urls");
       if (urls.isArray() && urls.size() > 0) {
         String u = urls.get(0).asText(null);
-        if (u != null && !u.isBlank()) return u;
+        if (u != null && !u.isBlank()) {
+          return u;
+        }
       }
     }
     return null;
