@@ -22,8 +22,8 @@ import org.springframework.web.reactive.function.client.WebClient;
  * {@code @Retry(name="embed")} 로 연속 실패 시 호출을 차단·재시도한다. 설계: {@code
  * docs/decisions/S1-resilience4j-design.md}.
  *
- * <p><b>주의</b>: Resilience4j 어노테이션이 예외 타입으로 서킷·재시도를 판정하므로, 원래 예외({@code TimeoutException} 등)를
- * 다른 타입으로 감싸지 않고 그대로 전파한다. (이전 구현은 모든 예외를 {@code RuntimeException} 으로 감싸 서킷이 발화하지 못했다.)
+ * <p><b>주의</b>: Resilience4j 어노테이션이 예외 타입으로 서킷·재시도를 판정하므로, 원래 예외({@code TimeoutException} 등)를 다른
+ * 타입으로 감싸지 않고 그대로 전파한다. (이전 구현은 모든 예외를 {@code RuntimeException} 으로 감싸 서킷이 발화하지 못했다.)
  */
 @Slf4j
 @Component
@@ -102,7 +102,8 @@ public class FastApiClient {
       throw new IllegalStateException("FastAPI 이미지 임베딩 응답이 비었습니다.");
     }
 
-    log.debug("FastAPI 이미지 임베딩 성공: bytes={}, dimension={}", imageBytes.length, response.dimension());
+    log.debug(
+        "FastAPI 이미지 임베딩 성공: bytes={}, dimension={}", imageBytes.length, response.dimension());
     return response.embedding();
   }
 }

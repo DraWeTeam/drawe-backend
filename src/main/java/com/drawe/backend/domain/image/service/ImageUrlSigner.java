@@ -15,11 +15,11 @@ import org.springframework.stereotype.Component;
  * DB 에 저장된 이미지({@code /images/{id}})를 브라우저 {@code <img>} 태그로 직접 로드할 수 있게 해주는 서명 발급/검증기.
  *
  * <p>배경: {@code /images/{id}} 는 JWT Bearer 헤더 인증 + 소유자 검증을 요구한다. 브라우저의 {@code <img src>} 요청에는
- * Authorization 헤더가 실리지 않으므로 AI 생성 이미지가 401/403 으로 깨진다 (베타 P0-1). 외부 절대 URL 인 Unsplash 시드는 영향
- * 없고 우리 DB blob (AI 이미지) 만 깨졌다.
+ * Authorization 헤더가 실리지 않으므로 AI 생성 이미지가 401/403 으로 깨진다 (베타 P0-1). 외부 절대 URL 인 Unsplash 시드는 영향 없고 우리
+ * DB blob (AI 이미지) 만 깨졌다.
  *
- * <p>해결: 노출 직전에 {@code /images/{id}?exp=<epoch초>&sig=<HMAC-SHA256>} 형태의 단기 서명 URL 을 발급한다.
- * 서빙 엔드포인트는 토큰·소유자 검증 대신 이 서명만 검증하므로 태그 로드가 가능하고, 추천 보드에서 타인의 AI 이미지도 정상 노출된다.
+ * <p>해결: 노출 직전에 {@code /images/{id}?exp=<epoch초>&sig=<HMAC-SHA256>} 형태의 단기 서명 URL 을 발급한다. 서빙 엔드포인트는
+ * 토큰·소유자 검증 대신 이 서명만 검증하므로 태그 로드가 가능하고, 추천 보드에서 타인의 AI 이미지도 정상 노출된다.
  *
  * <p>서명 시크릿은 {@code jwt.secret} (BASE64) 을 재사용한다 — 별도 키 운영 부담을 피한다. 서명 대상은 경로의 이미지 id 와 만료 시각뿐이라
  * JWT 와 용도가 겹치지 않는다.

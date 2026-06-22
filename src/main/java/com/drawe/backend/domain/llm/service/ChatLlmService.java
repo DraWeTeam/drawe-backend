@@ -19,9 +19,9 @@ import com.drawe.backend.domain.llm.contract.ReferenceImage;
 import com.drawe.backend.domain.llm.contract.StepContext;
 import com.drawe.backend.domain.llm.dto.*;
 import com.drawe.backend.domain.llm.metrics.LlmMetrics;
-import com.drawe.backend.domain.llm.workflow.WorkflowService;
 import com.drawe.backend.domain.llm.repository.ChatSessionRepository;
 import com.drawe.backend.domain.llm.repository.LlmMessageRepository;
+import com.drawe.backend.domain.llm.workflow.WorkflowService;
 import com.drawe.backend.domain.log.SearchLogService;
 import com.drawe.backend.domain.onboarding.UserPrefSummaryService;
 import com.drawe.backend.domain.project.repository.ProjectRepository;
@@ -220,8 +220,8 @@ public class ChatLlmService {
   /**
    * 의도 분류: 결정론적 룰 프리라우터를 먼저 시도하고, 미스면 Grok 풀 분류로 폴백한다.
    *
-   * <p>룰 히트/미스를 analytics(DB) + Micrometer(실시간) 로 집계해 ADR §4 DoD(룰 적중률 ≥ 30%, 분류 latency ≤
-   * 300ms) 를 측정한다.
+   * <p>룰 히트/미스를 analytics(DB) + Micrometer(실시간) 로 집계해 ADR §4 DoD(룰 적중률 ≥ 30%, 분류 latency ≤ 300ms) 를
+   * 측정한다.
    */
   /**
    * 분류 결과 + 어느 tier 가 결정했는지. {@code ruleDecided}=true 면 룰(RulePreRouter), false 면 Grok 폴백. shadow
@@ -412,11 +412,11 @@ public class ChatLlmService {
   }
 
   /**
-   * shadow 워크플로우 (트랙 A ③). 기존 chat() 검색 결과는 그대로 두고, WorkflowService(Komoran 경로)를 병렬로 한 번
-   * 돌려 같은 입력에 어떤 검색 결과를 냈을지 비교·로깅·메트릭만 한다. **실제 응답에는 영향이 없으며 예외도 절대 밖으로 던지지 않는다.**
+   * shadow 워크플로우 (트랙 A ③). 기존 chat() 검색 결과는 그대로 두고, WorkflowService(Komoran 경로)를 병렬로 한 번 돌려 같은 입력에
+   * 어떤 검색 결과를 냈을지 비교·로깅·메트릭만 한다. **실제 응답에는 영향이 없으며 예외도 절대 밖으로 던지지 않는다.**
    *
-   * <p>핵심 비교: 기존은 Grok 이 뽑은 영문 키워드로 검색, shadow 는 Komoran 형태소→사전 키워드로 검색. ref id 집합이
-   * 얼마나 겹치는지(match/partial/miss)로 트랙 B 사전 품질을 검증한다. 설계: {@code
+   * <p>핵심 비교: 기존은 Grok 이 뽑은 영문 키워드로 검색, shadow 는 Komoran 형태소→사전 키워드로 검색. ref id 집합이 얼마나
+   * 겹치는지(match/partial/miss)로 트랙 B 사전 품질을 검증한다. 설계: {@code
    * docs/decisions/S1A-workflow-shadow-design.md}.
    */
   private void shadowWorkflow(
@@ -433,20 +433,12 @@ public class ChatLlmService {
       // shadow 1차: rawMessage 를 그대로 cleanedMessage 로 (앵커 전처리는 ① 2차 몫).
       StepContext initial =
           StepContext.start(
-              user.getId(),
-              project.getId(),
-              sessionId,
-              message,
-              message,
-              intent,
-              null,
-              List.of());
+              user.getId(), project.getId(), sessionId, message, message, intent, null, List.of());
 
       StepContext finalCtx = workflowService.run(intent, initial);
 
       // 기존(baseline) vs shadow 검색결과 ref id 비교.
-      Set<Long> baseIds =
-          baselineResults.stream().map(ImageResult::id).collect(Collectors.toSet());
+      Set<Long> baseIds = baselineResults.stream().map(ImageResult::id).collect(Collectors.toSet());
       Set<Long> shadowIds =
           finalCtx.references().stream().map(ReferenceImage::imageId).collect(Collectors.toSet());
 
@@ -471,13 +463,13 @@ public class ChatLlmService {
    * baseline(Grok 키워드) vs shadow(Komoran 키워드) 검색결과 ref id 집합을 비교해 outcome 을 판정한다.
    *
    * <ul>
-   *   <li>{@code match} — 두 집합이 정확히 같음 (shadow 가 baseline 을 완전 재현)</li>
-   *   <li>{@code partial} — 교집합은 있으나 완전히 같지는 않음</li>
-   *   <li>{@code miss} — shadow 가 비었거나 교집합이 전혀 없음</li>
+   *   <li>{@code match} — 두 집합이 정확히 같음 (shadow 가 baseline 을 완전 재현)
+   *   <li>{@code partial} — 교집합은 있으나 완전히 같지는 않음
+   *   <li>{@code miss} — shadow 가 비었거나 교집합이 전혀 없음
    * </ul>
    *
-   * <p>shadow 가 비었으면(키워드 추출/검색이 결과 0) baseline 과 무관하게 {@code miss}. {@code error}(예외)는
-   * 호출 측 catch 가 별도로 찍으므로 여기서는 다루지 않는다. 순수 함수 — 테스트 용이성을 위해 분리.
+   * <p>shadow 가 비었으면(키워드 추출/검색이 결과 0) baseline 과 무관하게 {@code miss}. {@code error}(예외)는 호출 측 catch 가
+   * 별도로 찍으므로 여기서는 다루지 않는다. 순수 함수 — 테스트 용이성을 위해 분리.
    */
   static String classifyShadowOutcome(Set<Long> baseIds, Set<Long> shadowIds) {
     if (shadowIds.isEmpty()) {
@@ -851,8 +843,8 @@ public class ChatLlmService {
   }
 
   /**
-   * 응답으로 내보내기 직전 레퍼런스 이미지 URL 에 서명을 붙인다. DB 에는 상대경로({@code /images/{id}})로 저장하고 (만료가 박힌 URL 을
-   * 영구 저장하지 않기 위해) 노출 순간에만 서명한다. Unsplash 절대 URL 은 signer 가 그대로 통과시킨다.
+   * 응답으로 내보내기 직전 레퍼런스 이미지 URL 에 서명을 붙인다. DB 에는 상대경로({@code /images/{id}})로 저장하고 (만료가 박힌 URL 을 영구
+   * 저장하지 않기 위해) 노출 순간에만 서명한다. Unsplash 절대 URL 은 signer 가 그대로 통과시킨다.
    */
   private List<ChatResponse.ReferenceItem> signReferenceUrls(
       List<ChatResponse.ReferenceItem> items) {

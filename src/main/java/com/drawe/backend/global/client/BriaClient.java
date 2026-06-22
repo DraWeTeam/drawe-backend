@@ -16,9 +16,9 @@ import org.springframework.web.client.RestClientResponseException;
 /**
  * Bria 이미지 생성 클라이언트.
  *
- * <p>장애 격리: connect/read 타임아웃만 적용한다({@link HttpClientFactory}). 서킷브레이커는 의도적으로 제외 — Bria 는 자체
- * 폴링(최대 30s)과 에러 처리(HTTP 에러·폴링 실패 → {@code AI_SERVICE_ERROR})가 이미 견고하고, '생성 실패'라는 정상적 비즈니스
- * 결과까지 서킷을 열면 과민하기 때문. 설계: {@code docs/decisions/S1-resilience4j-design.md} §4.
+ * <p>장애 격리: connect/read 타임아웃만 적용한다({@link HttpClientFactory}). 서킷브레이커는 의도적으로 제외 — Bria 는 자체 폴링(최대
+ * 30s)과 에러 처리(HTTP 에러·폴링 실패 → {@code AI_SERVICE_ERROR})가 이미 견고하고, '생성 실패'라는 정상적 비즈니스 결과까지 서킷을 열면
+ * 과민하기 때문. 설계: {@code docs/decisions/S1-resilience4j-design.md} §4.
  */
 @Slf4j
 @Component
