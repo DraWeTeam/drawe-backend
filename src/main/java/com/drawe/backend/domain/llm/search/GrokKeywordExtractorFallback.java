@@ -14,19 +14,18 @@ import org.springframework.stereotype.Component;
 /**
  * {@link KeywordExtractorFallback} 의 Grok(xAI) 구현 — 사전 미스율 초과 시 LLM 키워드 재추출.
  *
- * <p>{@link KomoranKeywordExtractor} 가 사전 미스율 30% 초과를 감지하면 호출. 형태소·사전으로
- * 못 잡은 단어(예: "역동적"=dynamic, 신조어, 사전 미등록 미술 용어)를 Grok 이 문장 컨텍스트를 보고
- * 영문 검색 키워드로 재추출한다. {@code NoopKeywordExtractorFallback}(빈값) 의 실연결 대체.
+ * <p>{@link KomoranKeywordExtractor} 가 사전 미스율 30% 초과를 감지하면 호출. 형태소·사전으로 못 잡은 단어(예: "역동적"=dynamic,
+ * 신조어, 사전 미등록 미술 용어)를 Grok 이 문장 컨텍스트를 보고 영문 검색 키워드로 재추출한다. {@code NoopKeywordExtractorFallback}(빈값)
+ * 의 실연결 대체.
  *
  * <p><b>등록 효과</b>: 이 빈이 컨텍스트에 올라오면 {@code NoopKeywordExtractorFallback} 의
- * {@code @ConditionalOnMissingBean(KeywordExtractorFallback.class)} 조건이 깨져 Noop 은
- * 비활성화된다. (부팅 시 활성 fallback 이 이 구현체인지 통합에서 확인 권장.)
+ * {@code @ConditionalOnMissingBean(KeywordExtractorFallback.class)} 조건이 깨져 Noop 은 비활성화된다. (부팅 시 활성
+ * fallback 이 이 구현체인지 통합에서 확인 권장.)
  *
- * <p><b>장애 격리</b>: Grok 호출/파싱 실패 시 인터페이스 계약대로 빈 리스트를 반환한다(null 금지).
- * 검색 결과는 0건이 되지만 요청 흐름은 깨지지 않는다.
+ * <p><b>장애 격리</b>: Grok 호출/파싱 실패 시 인터페이스 계약대로 빈 리스트를 반환한다(null 금지). 검색 결과는 0건이 되지만 요청 흐름은 깨지지 않는다.
  *
- * <p>TODO (후속): ① Structured Output(JSON 스키마) 네이티브 강제 — 현재는 프롬프트 지시 + 관용
- * 파싱. ② Resilience4j 타임아웃·서킷브레이커 적용 (ADR §8). ③ 프롬프트 튜닝 (베타 로그 기반).
+ * <p>TODO (후속): ① Structured Output(JSON 스키마) 네이티브 강제 — 현재는 프롬프트 지시 + 관용 파싱. ② Resilience4j
+ * 타임아웃·서킷브레이커 적용 (ADR §8). ③ 프롬프트 튜닝 (베타 로그 기반).
  */
 @Slf4j
 @Component

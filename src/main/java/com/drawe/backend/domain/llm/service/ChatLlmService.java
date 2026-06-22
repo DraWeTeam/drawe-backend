@@ -23,11 +23,11 @@ import com.drawe.backend.domain.llm.contract.StepContext;
 import com.drawe.backend.domain.llm.dto.*;
 import com.drawe.backend.domain.llm.metrics.LlmMetrics;
 import com.drawe.backend.domain.llm.output.ComposedOutput;
-import com.drawe.backend.domain.llm.workflow.WorkflowService;
 import com.drawe.backend.domain.llm.repository.ChatSessionRepository;
 import com.drawe.backend.domain.llm.repository.LlmMessageRepository;
 import com.drawe.backend.domain.llm.session.SessionData;
 import com.drawe.backend.domain.llm.session.SessionService;
+import com.drawe.backend.domain.llm.workflow.WorkflowService;
 import com.drawe.backend.domain.log.SearchLogService;
 import com.drawe.backend.domain.onboarding.UserPrefSummaryService;
 import com.drawe.backend.domain.project.repository.ProjectRepository;
@@ -260,18 +260,19 @@ public class ChatLlmService {
   /**
    * ⑤ live 경로 — 전체 워크플로({@link WorkflowService})로 응답을 합성한다(설계 §3.3 "2번: 전체 워크플로").
    *
-   * <p>레거시 {@link #chat} 직접 합성과 책임 분담은 같다: <b>합성(검색→referenceContext→스키마 강제 LLM→파싱→
-   * 무결성)은 Executor</b>, <b>저장·analytics·메트릭·ChatResponse 조립은 여기</b>. {@code startForCompose} 로
+   * <p>레거시 {@link #chat} 직접 합성과 책임 분담은 같다: <b>합성(검색→referenceContext→스키마 강제 LLM→파싱→ 무결성)은
+   * Executor</b>, <b>저장·analytics·메트릭·ChatResponse 조립은 여기</b>. {@code startForCompose} 로
    * history(persona 포함)·이미지·provider 를 실어 보내고, 결과 {@code finalCtx.composedOutput()} 에서
    * message·citations·offerGenerate 를, {@code composeModel/composeLatencyMs} 에서 메타를 꺼낸다.
    *
-   * <p><b>레거시 대비 동등성(2026-06 갭 닫음):</b> 점수 가드(avg&lt;0.2 || max&lt;0.21 무관 결과 차단)는
-   * {@code SearchExecutor} 가, SEARCH_EXECUTED/BLOCKED·DECISION_KEEP/SKIP analytics 는 {@code emitSearchAnalytics}/
-   * {@code emitDecisionAnalytics} 가 재현한다(레거시 {@code handleSearchDecision} 과 payload 동등).
+   * <p><b>레거시 대비 동등성(2026-06 갭 닫음):</b> 점수 가드(avg&lt;0.2 || max&lt;0.21 무관 결과 차단)는 {@code
+   * SearchExecutor} 가, SEARCH_EXECUTED/BLOCKED·DECISION_KEEP/SKIP analytics 는 {@code
+   * emitSearchAnalytics}/ {@code emitDecisionAnalytics} 가 재현한다(레거시 {@code handleSearchDecision} 과
+   * payload 동등).
    *
-   * <p><b>⚠ 남은 의도된 차이:</b> 검색 키워드가 Grok(레거시)→Komoran(EXTRACT_KEYWORDS, live)로 바뀐다 —
-   * 같은 입력에 검색 결과가 갈릴 수 있다. shadow 경로가 ref id 겹침({@code drawe.workflow.shadow})을 측정하므로,
-   * 한 의도라도 shadow outcome 이 {@code match} 가 아니면 그 의도는 live 로 켜지 않는다. 켜질 때마다 한 줄 WARN.
+   * <p><b>⚠ 남은 의도된 차이:</b> 검색 키워드가 Grok(레거시)→Komoran(EXTRACT_KEYWORDS, live)로 바뀐다 — 같은 입력에 검색 결과가
+   * 갈릴 수 있다. shadow 경로가 ref id 겹침({@code drawe.workflow.shadow})을 측정하므로, 한 의도라도 shadow outcome 이
+   * {@code match} 가 아니면 그 의도는 live 로 켜지 않는다. 켜질 때마다 한 줄 WARN.
    */
   private ChatResponse chatViaWorkflow(
       User user,
@@ -336,9 +337,8 @@ public class ChatLlmService {
       }
 
       List<ReferenceImage> refs = finalCtx.references();
-      boolean offerGenerate =
-          output.offerGenerate()
-              || (intent.code() == IntentCode.NEW_SEARCH && refs.isEmpty());
+      final boolean offerGenerate =
+          output.offerGenerate() || (intent.code() == IntentCode.NEW_SEARCH && refs.isEmpty());
 
       // SEARCH analytics(SEARCH_EXECUTED/BLOCKED) — Executor 가 아니라 여기서 발사한다(갭 닫기).
       // SearchExecutor 가 점수가드 판정·통계를 finalCtx.searchStats() 로 실어 줬다. shadow 경로는 이 메서드를
@@ -349,11 +349,12 @@ public class ChatLlmService {
       // 텔레메트리. live 는 handleSearchDecision 을 안 타므로 여기서 재현한다(검색을 안 돈 의도에만 발사).
       emitDecisionAnalytics(user, session.getId(), intent.code(), request.message());
 
-      List<ChatResponse.ReferenceItem> refItems = toReferenceItems(refs);
+      final List<ChatResponse.ReferenceItem> refItems = toReferenceItems(refs);
 
       assistantMsg.setContent(output.message());
       assistantMsg.setModel(finalCtx.composeModel());
-      assistantMsg.setLatencyMs(finalCtx.composeLatencyMs() == null ? 0 : finalCtx.composeLatencyMs());
+      assistantMsg.setLatencyMs(
+          finalCtx.composeLatencyMs() == null ? 0 : finalCtx.composeLatencyMs());
       assistantMsg.setStatus(LlmCallStatus.SUCCESS);
       if (!refItems.isEmpty()) {
         assistantMsg.setReferences(refItems);
@@ -368,7 +369,8 @@ public class ChatLlmService {
       int latencyMs = finalCtx.composeLatencyMs() == null ? 0 : finalCtx.composeLatencyMs();
       Map<String, Object> successPayload = new HashMap<>();
       successPayload.put("latency_ms", latencyMs);
-      successPayload.put("response_length", output.message() != null ? output.message().length() : 0);
+      successPayload.put(
+          "response_length", output.message() != null ? output.message().length() : 0);
       successPayload.put("provider", provider.name());
       successPayload.put("model", finalCtx.composeModel());
       successPayload.put("reference_count", refItems.size());
@@ -409,9 +411,9 @@ public class ChatLlmService {
   /**
    * live 경로 전용 어댑터 — {@link ReferenceImage}(contract) → {@link ChatResponse.ReferenceItem}.
    *
-   * <p>{@code ReferenceImage} 에 복원된 표시 필드(photographerUsername·technique·subject·mood·source)를
-   * 그대로 옮겨 레거시 {@link #convertToReferenceItems}(ImageResult 기반)와 동등한 ReferenceItem 을 만든다.
-   * 프론트의 AI 배지(source) 등이 정상 동작한다.
+   * <p>{@code ReferenceImage} 에 복원된 표시 필드(photographerUsername·technique·subject·mood·source)를 그대로
+   * 옮겨 레거시 {@link #convertToReferenceItems}(ImageResult 기반)와 동등한 ReferenceItem 을 만든다. 프론트의 AI
+   * 배지(source) 등이 정상 동작한다.
    */
   private List<ChatResponse.ReferenceItem> toReferenceItems(List<ReferenceImage> refs) {
     return refs.stream()
@@ -431,17 +433,17 @@ public class ChatLlmService {
   }
 
   /**
-   * live 응답의 {@code referencesAction} 문자열 — 레거시 {@code decision.action().name()} 과 동등한
-   * "NEW_SEARCH" | "KEEP" | "SKIP" 을 돌려준다(프론트가 이 문자열로 분기).
+   * live 응답의 {@code referencesAction} 문자열 — 레거시 {@code decision.action().name()} 과 동등한 "NEW_SEARCH"
+   * | "KEEP" | "SKIP" 을 돌려준다(프론트가 이 문자열로 분기).
    *
-   * <p>레거시는 4-Action enum 이름을 그대로 썼지만 live 는 {@link IntentCode}(코드 001~008)를 들고 있어,
-   * 그대로 {@code code()} 를 내보내면 KEEP→"006"·SKIP→"007"·미술의도→"001~004" 같은 숫자가 응답에 새어 나간다.
-   * 검색을 새로 돌리는 NEW_SEARCH 만 "NEW_SEARCH" 이고, 직전 레퍼런스를 유지하는 의도(KEEP 및 그 세분류
-   * 001~004)는 전부 "KEEP", SKIP 은 "SKIP" 으로 접어 레거시 의미론과 맞춘다.
+   * <p>레거시는 4-Action enum 이름을 그대로 썼지만 live 는 {@link IntentCode}(코드 001~008)를 들고 있어, 그대로 {@code
+   * code()} 를 내보내면 KEEP→"006"·SKIP→"007"·미술의도→"001~004" 같은 숫자가 응답에 새어 나간다. 검색을 새로 돌리는 NEW_SEARCH 만
+   * "NEW_SEARCH" 이고, 직전 레퍼런스를 유지하는 의도(KEEP 및 그 세분류 001~004)는 전부 "KEEP", SKIP 은 "SKIP" 으로 접어 레거시
+   * 의미론과 맞춘다.
    */
   /**
-   * DECISION_KEEP / DECISION_SKIP 발사 — 레거시 {@code handleSearchDecision} 의 {@code case KEEP/SKIP} 과 동등.
-   * payload 는 레거시와 같이 {@code message_length} 한 칸. NEW_SEARCH 는 SEARCH_EXECUTED/BLOCKED 로 이미
+   * DECISION_KEEP / DECISION_SKIP 발사 — 레거시 {@code handleSearchDecision} 의 {@code case KEEP/SKIP} 과
+   * 동등. payload 는 레거시와 같이 {@code message_length} 한 칸. NEW_SEARCH 는 SEARCH_EXECUTED/BLOCKED 로 이미
    * 텔레메트리가 남으므로 여기선 발사하지 않는다(레거시도 KEEP/SKIP case 에서만 DECISION_* 를 쐈다).
    */
   private void emitDecisionAnalytics(User user, String sessionId, IntentCode code, String message) {
@@ -472,13 +474,14 @@ public class ChatLlmService {
    * ④ 단기메모리 저장 — 이번 턴 결과를 Redis 에 반영해 다음 턴 KEEP 의 {@code getOrRestore} 가 lookup 하게 한다.
    *
    * <p>분기 기준은 "이번 턴이 새 검색을 의도했는가"({@code NEW_SEARCH})이지 결과 유무가 아니다:
+   *
    * <ul>
    *   <li><b>NEW_SEARCH</b>: 이번 턴 결과({@code thisTurnRefs})로 references 를 <b>덮어쓴다</b> — 결과가 비어도
-   *       (점수가드 차단·검색 예외로 0건) 빈 리스트로 덮어 메모리를 비운다. 화면엔 references 0건이 나갔는데
-   *       메모리만 옛 refs 를 살려두면, 다음 KEEP 이 화면에 없던 레퍼런스를 부활시키는 UI-메모리 불일치가 난다.</li>
-   *   <li><b>KEEP/SKIP</b>: 이번 턴 검색 자체가 없었으므로 기존 {@code previousReferences} 를 그대로 유지하고
-   *       의도·시각만 갱신한다.</li>
+   *       (점수가드 차단·검색 예외로 0건) 빈 리스트로 덮어 메모리를 비운다. 화면엔 references 0건이 나갔는데 메모리만 옛 refs 를 살려두면, 다음
+   *       KEEP 이 화면에 없던 레퍼런스를 부활시키는 UI-메모리 불일치가 난다.
+   *   <li><b>KEEP/SKIP</b>: 이번 턴 검색 자체가 없었으므로 기존 {@code previousReferences} 를 그대로 유지하고 의도·시각만 갱신한다.
    * </ul>
+   *
    * 저장 자체는 best-effort — {@code SessionService#save} 구현이 Redis I/O 장애를 삼키므로 응답을 깨지 않는다.
    */
   private void persistSessionMemory(
@@ -495,8 +498,8 @@ public class ChatLlmService {
   /**
    * live 경로 SEARCH analytics 발사 — {@link SearchStats}(SearchExecutor 가 채움) 기준으로 SEARCH_EXECUTED 또는
    * SEARCH_BLOCKED 를 발사한다. payload 는 레거시 {@code handleSearchDecision} 과 동등(keyword·result_count·
-   * avg/max/min·blocked·image_ids·scores). NEW_SEARCH 가 아니거나(=SEARCH step 없음) 키워드가 없어 검색을
-   * 안 했으면 {@code searchStats} 가 null 이라 발사하지 않는다.
+   * avg/max/min·blocked·image_ids·scores). NEW_SEARCH 가 아니거나(=SEARCH step 없음) 키워드가 없어 검색을 안 했으면
+   * {@code searchStats} 가 null 이라 발사하지 않는다.
    */
   private void emitSearchAnalytics(User user, String sessionId, SearchStats stats, String message) {
     if (stats == null) {
@@ -530,8 +533,8 @@ public class ChatLlmService {
   /**
    * 의도 분류: 결정론적 룰 프리라우터를 먼저 시도하고, 미스면 Grok 풀 분류로 폴백한다.
    *
-   * <p>룰 히트/미스를 analytics(DB) + Micrometer(실시간) 로 집계해 ADR §4 DoD(룰 적중률 ≥ 30%, 분류 latency ≤
-   * 300ms) 를 측정한다.
+   * <p>룰 히트/미스를 analytics(DB) + Micrometer(실시간) 로 집계해 ADR §4 DoD(룰 적중률 ≥ 30%, 분류 latency ≤ 300ms) 를
+   * 측정한다.
    */
   /**
    * 분류 결과 + 어느 tier 가 결정했는지. {@code ruleDecided}=true 면 룰(RulePreRouter), false 면 Grok 폴백. shadow
@@ -722,11 +725,11 @@ public class ChatLlmService {
   }
 
   /**
-   * shadow 워크플로우 (트랙 A ③). 기존 chat() 검색 결과는 그대로 두고, WorkflowService(Komoran 경로)를 병렬로 한 번
-   * 돌려 같은 입력에 어떤 검색 결과를 냈을지 비교·로깅·메트릭만 한다. **실제 응답에는 영향이 없으며 예외도 절대 밖으로 던지지 않는다.**
+   * shadow 워크플로우 (트랙 A ③). 기존 chat() 검색 결과는 그대로 두고, WorkflowService(Komoran 경로)를 병렬로 한 번 돌려 같은 입력에
+   * 어떤 검색 결과를 냈을지 비교·로깅·메트릭만 한다. **실제 응답에는 영향이 없으며 예외도 절대 밖으로 던지지 않는다.**
    *
-   * <p>핵심 비교: 기존은 Grok 이 뽑은 영문 키워드로 검색, shadow 는 Komoran 형태소→사전 키워드로 검색. ref id 집합이
-   * 얼마나 겹치는지(match/partial/miss)로 트랙 B 사전 품질을 검증한다. 설계: {@code
+   * <p>핵심 비교: 기존은 Grok 이 뽑은 영문 키워드로 검색, shadow 는 Komoran 형태소→사전 키워드로 검색. ref id 집합이 얼마나
+   * 겹치는지(match/partial/miss)로 트랙 B 사전 품질을 검증한다. 설계: {@code
    * docs/decisions/S1A-workflow-shadow-design.md}.
    */
   private void shadowWorkflow(
@@ -743,20 +746,12 @@ public class ChatLlmService {
       // shadow 1차: rawMessage 를 그대로 cleanedMessage 로 (앵커 전처리는 ① 2차 몫).
       StepContext initial =
           StepContext.start(
-              user.getId(),
-              project.getId(),
-              sessionId,
-              message,
-              message,
-              intent,
-              null,
-              List.of());
+              user.getId(), project.getId(), sessionId, message, message, intent, null, List.of());
 
       StepContext finalCtx = workflowService.run(intent, initial);
 
       // 기존(baseline) vs shadow 검색결과 ref id 비교.
-      Set<Long> baseIds =
-          baselineResults.stream().map(ImageResult::id).collect(Collectors.toSet());
+      Set<Long> baseIds = baselineResults.stream().map(ImageResult::id).collect(Collectors.toSet());
       Set<Long> shadowIds =
           finalCtx.references().stream().map(ReferenceImage::imageId).collect(Collectors.toSet());
 
@@ -781,13 +776,13 @@ public class ChatLlmService {
    * baseline(Grok 키워드) vs shadow(Komoran 키워드) 검색결과 ref id 집합을 비교해 outcome 을 판정한다.
    *
    * <ul>
-   *   <li>{@code match} — 두 집합이 정확히 같음 (shadow 가 baseline 을 완전 재현)</li>
-   *   <li>{@code partial} — 교집합은 있으나 완전히 같지는 않음</li>
-   *   <li>{@code miss} — shadow 가 비었거나 교집합이 전혀 없음</li>
+   *   <li>{@code match} — 두 집합이 정확히 같음 (shadow 가 baseline 을 완전 재현)
+   *   <li>{@code partial} — 교집합은 있으나 완전히 같지는 않음
+   *   <li>{@code miss} — shadow 가 비었거나 교집합이 전혀 없음
    * </ul>
    *
-   * <p>shadow 가 비었으면(키워드 추출/검색이 결과 0) baseline 과 무관하게 {@code miss}. {@code error}(예외)는
-   * 호출 측 catch 가 별도로 찍으므로 여기서는 다루지 않는다. 순수 함수 — 테스트 용이성을 위해 분리.
+   * <p>shadow 가 비었으면(키워드 추출/검색이 결과 0) baseline 과 무관하게 {@code miss}. {@code error}(예외)는 호출 측 catch 가
+   * 별도로 찍으므로 여기서는 다루지 않는다. 순수 함수 — 테스트 용이성을 위해 분리.
    */
   static String classifyShadowOutcome(Set<Long> baseIds, Set<Long> shadowIds) {
     if (shadowIds.isEmpty()) {
@@ -1141,8 +1136,8 @@ public class ChatLlmService {
   }
 
   /**
-   * 응답으로 내보내기 직전 레퍼런스 이미지 URL 에 서명을 붙인다. DB 에는 상대경로({@code /images/{id}})로 저장하고 (만료가 박힌 URL 을
-   * 영구 저장하지 않기 위해) 노출 순간에만 서명한다. Unsplash 절대 URL 은 signer 가 그대로 통과시킨다.
+   * 응답으로 내보내기 직전 레퍼런스 이미지 URL 에 서명을 붙인다. DB 에는 상대경로({@code /images/{id}})로 저장하고 (만료가 박힌 URL 을 영구
+   * 저장하지 않기 위해) 노출 순간에만 서명한다. Unsplash 절대 URL 은 signer 가 그대로 통과시킨다.
    */
   private List<ChatResponse.ReferenceItem> signReferenceUrls(
       List<ChatResponse.ReferenceItem> items) {

@@ -79,23 +79,22 @@ public class LlmMetrics {
   }
 
   /**
-   * COMPOSE 응답 구조 위반(설계 §5.2, DoD ≤1%). 분모는 COMPOSE 호출 수
-   * ({@code drawe.workflow.step{step=COMPOSE}} count).
+   * COMPOSE 응답 구조 위반(설계 §5.2, DoD ≤1%). 분모는 COMPOSE 호출 수 ({@code drawe.workflow.step{step=COMPOSE}}
+   * count).
    *
    * @param provider LLM 공급자 (GROK/CLAUDE/GEMINI)
-   * @param reason   위반 사유 (유한: {@code json_broke} 깨진 JSON 폴백 | {@code schema_reject} 스키마 거부)
+   * @param reason 위반 사유 (유한: {@code json_broke} 깨진 JSON 폴백 | {@code schema_reject} 스키마 거부)
    */
   public void structureViolation(String provider, String reason) {
     registry.counter(STRUCTURE_VIOLATION, "provider", provider, "reason", reason).increment();
   }
 
   /**
-   * 환각 인용 발생(설계 §5.2, DoD <b>0건</b>). 1건이라도 카운트되면 알림 대상. source 별로 분리해
-   * 어디서 새는지 본다.
+   * 환각 인용 발생(설계 §5.2, DoD <b>0건</b>). 1건이라도 카운트되면 알림 대상. source 별로 분리해 어디서 새는지 본다.
    *
    * @param source 환각 출처 (유한: {@code citations_field} citations 슬롯 범위밖 | {@code body_scan} 본문 [N]
    *     범위밖 | {@code no_refs} 참고 0인데 인용함)
-   * @param count  해당 source 의 환각 수. 0 이면 발사하지 않는다.
+   * @param count 해당 source 의 환각 수. 0 이면 발사하지 않는다.
    */
   public void hallucinatedCitation(String source, int count) {
     if (count <= 0) {

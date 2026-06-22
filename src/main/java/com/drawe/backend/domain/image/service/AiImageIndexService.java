@@ -98,9 +98,8 @@ public class AiImageIndexService {
   /**
    * 일반(Bria) AI 이미지의 Pinecone 메타 출처값. 코랩 Unsplash 시드와 구분한다.
    *
-   * <p>가이드용(FastAPI+Gemini) 이미지는 별도 namespace 로 분리 적재하되, 같은 메타 키({@code
-   * image_source})에 다른 출처값을 넣어 namespace 안에서도 출처를 식별할 수 있게 한다. 가이드 출처값·
-   * 적재 경로는 가이드 FastAPI 스키마 확정 시 추가. 설계: {@code
+   * <p>가이드용(FastAPI+Gemini) 이미지는 별도 namespace 로 분리 적재하되, 같은 메타 키({@code image_source})에 다른 출처값을 넣어
+   * namespace 안에서도 출처를 식별할 수 있게 한다. 가이드 출처값· 적재 경로는 가이드 FastAPI 스키마 확정 시 추가. 설계: {@code
    * docs/decisions/S3-guide-namespace-design.md}.
    */
   static final String SOURCE_AI_GENERATED = "AI_GENERATED";

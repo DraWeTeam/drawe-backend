@@ -13,12 +13,11 @@ import org.springframework.stereotype.Component;
 /**
  * 결정론적 참조 무결성 검사(설계 §5, ADR §6.3) — <b>재호출 없음</b>.
  *
- * <p>유효 인덱스 집합은 {@code {1 .. refs.size()}}. 이 밖의 인용은 환각이다. 본문 {@code [N]} 토큰과
- * {@code citations} 슬롯 양쪽에서 환각만 제거하고 응답은 통과시킨다(문장 전체 삭제 아님). refs 가 비어있으면
- * 모든 인용이 환각이므로 전부 제거한다.
+ * <p>유효 인덱스 집합은 {@code {1 .. refs.size()}}. 이 밖의 인용은 환각이다. 본문 {@code [N]} 토큰과 {@code citations} 슬롯
+ * 양쪽에서 환각만 제거하고 응답은 통과시킨다(문장 전체 삭제 아님). refs 가 비어있으면 모든 인용이 환각이므로 전부 제거한다.
  *
- * <p>본문 정정은 환각 토큰 {@code [N]} 자체만 지우고, 토큰 앞에 붙어 흐름을 깨는 공백을 정리한다(§5.1-4).
- * 유효한 {@code [N]} 은 그대로 둔다 — 사용자가 보는 번호와 references 표시 순서가 매칭되어야 하므로.
+ * <p>본문 정정은 환각 토큰 {@code [N]} 자체만 지우고, 토큰 앞에 붙어 흐름을 깨는 공백을 정리한다(§5.1-4). 유효한 {@code [N]} 은 그대로 둔다 —
+ * 사용자가 보는 번호와 references 표시 순서가 매칭되어야 하므로.
  */
 @Slf4j
 @Component
@@ -30,7 +29,7 @@ public class OutputIntegrityChecker {
   /**
    * 환각 인용을 제거한 정정본을 만든다.
    *
-   * @param raw  파싱된 원본 출력({@link OutputParser#parse} 결과).
+   * @param raw 파싱된 원본 출력({@link OutputParser#parse} 결과).
    * @param refs 검색이 채운 references(B). null 이면 빈 리스트로 취급(전부 환각).
    * @return 정정된 출력 + 위반 카운트.
    */
@@ -84,10 +83,9 @@ public class OutputIntegrityChecker {
   }
 
   /**
-   * 환각 토큰 삭제 후 흔적 정리(결정론적). 줄바꿈은 보존하고 가로 공백만 손본다:
-   * 문장부호 직전의 잉여 공백 제거({@code "예시 ."}→{@code "예시."}), 가로 공백 run 을 한 칸으로,
-   * 각 줄 끝 공백 제거. 토큰이 단어 사이에 있었던 경우({@code "기법[4]을"}→{@code "기법을"})는 공백이
-   * 애초에 없으므로 영향 없음.
+   * 환각 토큰 삭제 후 흔적 정리(결정론적). 줄바꿈은 보존하고 가로 공백만 손본다: 문장부호 직전의 잉여 공백 제거({@code "예시 ."}→{@code "예시."}),
+   * 가로 공백 run 을 한 칸으로, 각 줄 끝 공백 제거. 토큰이 단어 사이에 있었던 경우({@code "기법[4]을"}→{@code "기법을"})는 공백이 애초에 없으므로
+   * 영향 없음.
    */
   private static String tidyAfterRemoval(String s) {
     String r = s.replaceAll("[ \\t]+([,.!?;:)\\]」』”])", "$1"); // 부호 직전 공백

@@ -117,8 +117,8 @@ public class GrokService implements LlmService {
   }
 
   /**
-   * 스키마 이름 → OpenAI 호환 {@code response_format} 매핑. 현재는 COMPOSE 가이드 응답 스키마 1종.
-   * null/blank/미등록 이름은 {@code null} 반환(평문). 순수 함수 — 테스트 용이성을 위해 분리.
+   * 스키마 이름 → OpenAI 호환 {@code response_format} 매핑. 현재는 COMPOSE 가이드 응답 스키마 1종. null/blank/미등록 이름은
+   * {@code null} 반환(평문). 순수 함수 — 테스트 용이성을 위해 분리.
    */
   static Map<String, Object> responseFormatFor(String schemaName) {
     if (schemaName == null || schemaName.isBlank()) {
@@ -126,7 +126,8 @@ public class GrokService implements LlmService {
     }
     if (DRAW_GUIDE_SCHEMA_NAME.equals(schemaName)) {
       return Map.of(
-          "type", "json_schema",
+          "type",
+          "json_schema",
           "json_schema",
           Map.of("name", DRAW_GUIDE_SCHEMA_NAME, "strict", true, "schema", DRAW_GUIDE_SCHEMA));
     }
@@ -141,15 +142,18 @@ public class GrokService implements LlmService {
    * COMPOSE 가이드 응답 스키마(설계 §4.1). message=본문, citations=인용한 references 1-based 인덱스,
    * offer_generate=자료 부족 시 생성 제안(LLM 의견; 최종 노출은 시스템이 결정).
    *
-   * <p><b>strict 규칙</b>: xAI/OpenAI 호환 {@code strict:true} 는 properties 의 <i>모든</i> 키가
-   * {@code required} 에 있고 {@code additionalProperties:false} 일 것을 요구한다(스키마 거부 방지). 따라서
-   * offer_generate 도 required 에 포함 — boolean 이라 LLM 이 항상 채워도 부담이 적고, 값 자체는 보조 신호일 뿐.
+   * <p><b>strict 규칙</b>: xAI/OpenAI 호환 {@code strict:true} 는 properties 의 <i>모든</i> 키가 {@code
+   * required} 에 있고 {@code additionalProperties:false} 일 것을 요구한다(스키마 거부 방지). 따라서 offer_generate 도
+   * required 에 포함 — boolean 이라 LLM 이 항상 채워도 부담이 적고, 값 자체는 보조 신호일 뿐.
    */
   private static final Map<String, Object> DRAW_GUIDE_SCHEMA =
       Map.of(
-          "type", "object",
-          "additionalProperties", false,
-          "required", List.of("message", "citations", "offer_generate"),
+          "type",
+          "object",
+          "additionalProperties",
+          false,
+          "required",
+          List.of("message", "citations", "offer_generate"),
           "properties",
           Map.of(
               "message", Map.of("type", "string"),

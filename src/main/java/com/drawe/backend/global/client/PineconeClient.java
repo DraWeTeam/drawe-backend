@@ -88,9 +88,9 @@ public class PineconeClient {
   /**
    * 벡터 하나를 지정 namespace 에 upsert.
    *
-   * <p>{@code namespace} 가 null 이면 default namespace("") — 기존 일반 적재와 동일. 가이드용
-   * 이미지 벡터는 일반 검색에 섞이지 않도록 별도 namespace(예: {@code "guide"}) 로 분리한다. 설계:
-   * {@code docs/decisions/S3-guide-namespace-design.md}.
+   * <p>{@code namespace} 가 null 이면 default namespace("") — 기존 일반 적재와 동일. 가이드용 이미지 벡터는 일반 검색에 섞이지
+   * 않도록 별도 namespace(예: {@code "guide"}) 로 분리한다. 설계: {@code
+   * docs/decisions/S3-guide-namespace-design.md}.
    *
    * @param id Pinecone vector ID. Image.sourceId와 동일 값을 사용 (예: "ai_1234")
    * @param vector L2 정규화된 768차원 CLIP 벡터

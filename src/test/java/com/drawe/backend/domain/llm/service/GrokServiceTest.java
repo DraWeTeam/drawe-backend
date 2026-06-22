@@ -11,8 +11,8 @@ import org.junit.jupiter.api.Test;
 /**
  * GrokService 단위 테스트 — Structured Output 매핑(S2' Phase 3 ②)에 집중.
  *
- * <p>HTTP 호출은 통합 범위(③④). 여기서는 순수 함수 {@code responseFormatFor} 의 분기만 검증한다:
- * 스키마 이름 → {@code response_format} 유무 + json_schema/strict 구조.
+ * <p>HTTP 호출은 통합 범위(③④). 여기서는 순수 함수 {@code responseFormatFor} 의 분기만 검증한다: 스키마 이름 → {@code
+ * response_format} 유무 + json_schema/strict 구조.
  */
 class GrokServiceTest {
 
