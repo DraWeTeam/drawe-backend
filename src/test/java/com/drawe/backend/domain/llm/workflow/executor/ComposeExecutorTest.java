@@ -30,9 +30,9 @@ import org.junit.jupiter.api.Test;
 /**
  * ComposeExecutor 단위 테스트(트랙 A ④) — 합성 로직 이관 검증.
  *
- * <p>LlmService 는 익명 fake 로 격리하고, OutputParser·OutputIntegrityChecker 는 실제 객체를 쓴다
- * (③에서 검증된 결정론적 순수 클래스). 검증 포인트: provider 선택, 스키마(draw_guide_response) 강제 전달,
- * references 유무에 따른 SYSTEM turn, ③ 무결성 정정 실연결, offerGenerate 힌트, 멱등성, provider 없음 예외.
+ * <p>LlmService 는 익명 fake 로 격리하고, OutputParser·OutputIntegrityChecker 는 실제 객체를 쓴다 (③에서 검증된 결정론적 순수
+ * 클래스). 검증 포인트: provider 선택, 스키마(draw_guide_response) 강제 전달, references 유무에 따른 SYSTEM turn, ③ 무결성
+ * 정정 실연결, offerGenerate 힌트, 멱등성, provider 없음 예외.
  */
 class ComposeExecutorTest {
 
@@ -63,7 +63,8 @@ class ComposeExecutorTest {
   private static List<ReferenceImage> refs(int count) {
     List<ReferenceImage> list = new ArrayList<>();
     for (int i = 1; i <= count; i++) {
-      list.add(new ReferenceImage((long) i, i, "u" + i, "p" + i, BigDecimal.ONE, List.of("tag" + i)));
+      list.add(
+          new ReferenceImage((long) i, i, "u" + i, "p" + i, BigDecimal.ONE, List.of("tag" + i)));
     }
     return list;
   }
@@ -80,9 +81,18 @@ class ComposeExecutorTest {
       IntentCode code) {
     StepContext base =
         StepContext.startForCompose(
-            1L, 2L, "s1", "벚꽃 그리고 싶어", "벚꽃 그리고 싶어",
+            1L,
+            2L,
+            "s1",
+            "벚꽃 그리고 싶어",
+            "벚꽃 그리고 싶어",
             IntentResult.of(code, IntentResult.Tier.RULE),
-            null, List.of(), history, null, null, provider);
+            null,
+            List.of(),
+            history,
+            null,
+            null,
+            provider);
     return base.withReferences(references);
   }
 
@@ -103,12 +113,10 @@ class ComposeExecutorTest {
               LlmProvider.GROK,
               "{\"message\":\"[1]번처럼 그려보세요\",\"citations\":[1],\"offer_generate\":false}",
               captured);
-      StepContext result =
-          executor(llm).execute(ctxWith(LlmProvider.GROK, refs(2), List.of()));
+      StepContext result = executor(llm).execute(ctxWith(LlmProvider.GROK, refs(2), List.of()));
 
       // 스키마 강제 전달
-      assertThat(captured.get().responseSchemaName())
-          .isEqualTo(GrokService.DRAW_GUIDE_SCHEMA_NAME);
+      assertThat(captured.get().responseSchemaName()).isEqualTo(GrokService.DRAW_GUIDE_SCHEMA_NAME);
       // references SYSTEM turn 이 붙었다
       assertThat(captured.get().history()).hasSize(1);
       assertThat(captured.get().history().get(0).role()).isEqualTo(MessageRole.SYSTEM);
@@ -128,8 +136,7 @@ class ComposeExecutorTest {
               LlmProvider.GROK,
               "{\"message\":\"자료가 부족해요\",\"citations\":[],\"offer_generate\":true}",
               captured);
-      StepContext result =
-          executor(llm).execute(ctxWith(LlmProvider.GROK, List.of(), List.of()));
+      StepContext result = executor(llm).execute(ctxWith(LlmProvider.GROK, List.of(), List.of()));
 
       assertThat(captured.get().history().get(0).content()).contains("참고 이미지가 없습니다");
       assertThat(result.composedOutput().offerGenerate()).isTrue();
@@ -144,8 +151,7 @@ class ComposeExecutorTest {
               LlmProvider.GROK,
               "{\"message\":\"직전 답변을 이어 설명하면…\",\"citations\":[],\"offer_generate\":false}",
               captured);
-      executor(llm)
-          .execute(ctxWith(LlmProvider.GROK, List.of(), List.of(), IntentCode.FOLLOWUP));
+      executor(llm).execute(ctxWith(LlmProvider.GROK, List.of(), List.of(), IntentCode.FOLLOWUP));
 
       String guide = captured.get().history().get(0).content();
       // FOLLOWUP 전용 '후속 질문 안내' 가이드가 적용됨 (기본 '참고 이미지 안내'가 아님)
@@ -165,8 +171,7 @@ class ComposeExecutorTest {
               LlmProvider.GROK,
               "{\"message\":\"1번은 부드럽고 2번은 대비가 강해요…\",\"citations\":[],\"offer_generate\":false}",
               captured);
-      executor(llm)
-          .execute(ctxWith(LlmProvider.GROK, List.of(), List.of(), IntentCode.COMPARE));
+      executor(llm).execute(ctxWith(LlmProvider.GROK, List.of(), List.of(), IntentCode.COMPARE));
 
       String guide = captured.get().history().get(0).content();
       // COMPARE 전용 '비교 안내' 가이드가 적용됨 (기본 '참고 이미지 안내'가 아님)
@@ -203,9 +208,18 @@ class ComposeExecutorTest {
     private StepContext keepCtx(List<ReferenceImage> prev) {
       StepContext base =
           StepContext.startForCompose(
-              1L, 2L, "s1", "아까 그거 더 보여줘", "아까 그거 더 보여줘",
+              1L,
+              2L,
+              "s1",
+              "아까 그거 더 보여줘",
+              "아까 그거 더 보여줘",
               IntentResult.of(null, IntentResult.Tier.RULE),
-              null, prev, List.of(), null, null, LlmProvider.GROK);
+              null,
+              prev,
+              List.of(),
+              null,
+              null,
+              LlmProvider.GROK);
       // references 는 명시적으로 비운 채(=이번 턴 검색 없음) 둔다.
       return base;
     }
@@ -276,8 +290,7 @@ class ComposeExecutorTest {
               LlmProvider.GROK,
               "{\"message\":\"[1]좋고 [3]도 좋아요\",\"citations\":[1,3],\"offer_generate\":false}",
               null);
-      StepContext result =
-          executor(llm).execute(ctxWith(LlmProvider.GROK, refs(2), List.of()));
+      StepContext result = executor(llm).execute(ctxWith(LlmProvider.GROK, refs(2), List.of()));
 
       assertThat(result.composedOutput().citations()).containsExactly(1);
       assertThat(result.composedOutput().message()).doesNotContain("[3]");
@@ -293,8 +306,7 @@ class ComposeExecutorTest {
     @DisplayName("깨진 JSON 은 원본 노출 없이 안전 템플릿으로 폴백")
     void brokenJsonFallback() {
       LlmService llm = fakeLlm(LlmProvider.GROK, "이건 JSON 이 아님 <원본 노출되면 안 됨>", null);
-      StepContext result =
-          executor(llm).execute(ctxWith(LlmProvider.GROK, List.of(), List.of()));
+      StepContext result = executor(llm).execute(ctxWith(LlmProvider.GROK, List.of(), List.of()));
 
       assertThat(result.composedOutput().message())
           .isEqualTo(OutputParser.BROKEN_JSON_FALLBACK_MESSAGE);
@@ -309,8 +321,7 @@ class ComposeExecutorTest {
               LlmProvider.GROK,
               "{\"message\":\"원하시면 AI 이미지로 만들어드릴까요?\",\"citations\":[],\"offer_generate\":false}",
               null);
-      StepContext result =
-          executor(llm).execute(ctxWith(LlmProvider.GROK, List.of(), List.of()));
+      StepContext result = executor(llm).execute(ctxWith(LlmProvider.GROK, List.of(), List.of()));
 
       assertThat(result.composedOutput().offerGenerate()).isTrue();
     }
@@ -342,8 +353,7 @@ class ComposeExecutorTest {
     @Test
     @DisplayName("provider 에 해당하는 service 가 없으면 CustomException")
     void missingProvider() {
-      LlmService grok =
-          fakeLlm(LlmProvider.GROK, "{\"message\":\"x\",\"citations\":[]}", null);
+      LlmService grok = fakeLlm(LlmProvider.GROK, "{\"message\":\"x\",\"citations\":[]}", null);
       ComposeExecutor exec = new ComposeExecutor(List.of(grok), parser, checker, metrics);
 
       assertThatThrownBy(() -> exec.execute(ctxWith(LlmProvider.CLAUDE, List.of(), List.of())))
@@ -383,7 +393,9 @@ class ComposeExecutorTest {
       LlmService llm = fakeLlm(LlmProvider.GROK, "not json", null);
       executor(llm).execute(ctxWith(LlmProvider.GROK, refs(1), List.of()));
 
-      assertThat(counter("drawe.output.structure_violation", "provider", "GROK", "reason", "json_broke"))
+      assertThat(
+              counter(
+                  "drawe.output.structure_violation", "provider", "GROK", "reason", "json_broke"))
           .isEqualTo(1.0);
     }
 
@@ -402,7 +414,8 @@ class ComposeExecutorTest {
     }
 
     @Test
-    @DisplayName("refs 있는데 범위밖 인용 → hallucinated_citation{source=citations_field/body_scan} + citation_removed")
+    @DisplayName(
+        "refs 있는데 범위밖 인용 → hallucinated_citation{source=citations_field/body_scan} + citation_removed")
     void rangeViolationFiresBySource() {
       LlmService llm =
           fakeLlm(
@@ -412,8 +425,10 @@ class ComposeExecutorTest {
       executor(llm).execute(ctxWith(LlmProvider.GROK, refs(2), List.of()));
 
       // [3] 은 citations 슬롯에서 1건, 본문에서 1건 → 각 source 1
-      assertThat(counter("drawe.output.hallucinated_citation", "source", "citations_field")).isEqualTo(1.0);
-      assertThat(counter("drawe.output.hallucinated_citation", "source", "body_scan")).isEqualTo(1.0);
+      assertThat(counter("drawe.output.hallucinated_citation", "source", "citations_field"))
+          .isEqualTo(1.0);
+      assertThat(counter("drawe.output.hallucinated_citation", "source", "body_scan"))
+          .isEqualTo(1.0);
       assertThat(counter("drawe.output.hallucinated_citation", "source", "no_refs")).isZero();
       assertThat(counter("drawe.output.citation_removed")).isEqualTo(2.0);
     }
@@ -429,7 +444,8 @@ class ComposeExecutorTest {
       executor(llm).execute(ctxWith(LlmProvider.GROK, List.of(), List.of()));
 
       assertThat(counter("drawe.output.hallucinated_citation", "source", "no_refs")).isEqualTo(2.0);
-      assertThat(counter("drawe.output.hallucinated_citation", "source", "citations_field")).isZero();
+      assertThat(counter("drawe.output.hallucinated_citation", "source", "citations_field"))
+          .isZero();
       assertThat(counter("drawe.output.citation_removed")).isEqualTo(2.0);
     }
   }

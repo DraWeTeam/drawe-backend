@@ -158,9 +158,8 @@ public class RulePreRouter {
   /**
    * 메시지가 "작업물 비평 요청" 신호를 담고 있는지 (010 SELF_CRITIQUE 후보). 결정론적·LLM 콜 0.
    *
-   * <p><b>이것만으로는 010 이 아니다.</b> 이미지 없이 "어때?"는 일반 대화일 수 있으므로, 호출 측이
-   * {@code hasUploadedImage && isCritiqueRequest(message)} 로 결합해야 010 을 확정한다(설계 §2.2). 신호가
-   * 약하면 false → 기존 분류 경로로 흘려보낸다(회귀 없음).
+   * <p><b>이것만으로는 010 이 아니다.</b> 이미지 없이 "어때?"는 일반 대화일 수 있으므로, 호출 측이 {@code hasUploadedImage &&
+   * isCritiqueRequest(message)} 로 결합해야 010 을 확정한다(설계 §2.2). 신호가 약하면 false → 기존 분류 경로로 흘려보낸다(회귀 없음).
    */
   public boolean isCritiqueRequest(String userMessage) {
     if (userMessage == null || userMessage.isBlank()) {
@@ -172,9 +171,9 @@ public class RulePreRouter {
   /**
    * 메시지가 "명백히 그림과 무관한 도메인 외 질문" 인지 (000 OUT_OF_DOMAIN 후보). 결정론적·LLM 콜 0.
    *
-   * <p><b>매우 보수적</b>: 오탐(미술 관련인데 거절)이 거절 UX 를 크게 해치므로, 강한 비미술 신호가 있고 <b>그림 맥락
-   * 신호가 없을 때만</b> true. 둘 다 잡히면(예: "노을 색 그리는데 날씨 표현은?") 그림 맥락에 양보해 false →
-   * 기존 분류 경로로 흘린다(페르소나 v2 가 도메인 락으로 거절 톤을 처리하므로 안전). 설계 §000.
+   * <p><b>매우 보수적</b>: 오탐(미술 관련인데 거절)이 거절 UX 를 크게 해치므로, 강한 비미술 신호가 있고 <b>그림 맥락 신호가 없을 때만</b> true. 둘
+   * 다 잡히면(예: "노을 색 그리는데 날씨 표현은?") 그림 맥락에 양보해 false → 기존 분류 경로로 흘린다(페르소나 v2 가 도메인 락으로 거절 톤을 처리하므로
+   * 안전). 설계 §000.
    */
   public boolean isOutOfDomain(String userMessage) {
     if (userMessage == null || userMessage.isBlank()) {

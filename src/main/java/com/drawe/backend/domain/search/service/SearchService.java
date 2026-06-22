@@ -58,9 +58,9 @@ public class SearchService {
   }
 
   /**
-   * 이미지(또는 임의) 벡터로 유사도 검색. 텍스트 {@link #search} 와 동일한 CLIP 공간·동일 조립 경로를 공유하되
-   * 1단계(텍스트 임베딩)만 건너뛴다. 010 SELF_CRITIQUE 의 "내 작업물과 비슷한 레퍼런스 첨부"(a2)에서
-   * {@code FastApiClient.embedImage} 결과를 그대로 넘겨 호출한다. 설계: {@code docs/decisions/S3A-self-critique-design.md} §7.
+   * 이미지(또는 임의) 벡터로 유사도 검색. 텍스트 {@link #search} 와 동일한 CLIP 공간·동일 조립 경로를 공유하되 1단계(텍스트 임베딩)만 건너뛴다. 010
+   * SELF_CRITIQUE 의 "내 작업물과 비슷한 레퍼런스 첨부"(a2)에서 {@code FastApiClient.embedImage} 결과를 그대로 넘겨 호출한다.
+   * 설계: {@code docs/decisions/S3A-self-critique-design.md} §7.
    *
    * <p>트랜잭션·외부호출 격리 정책은 {@link #search} 와 동일(REQUIRES_NEW) — 검색 실패가 호출자 트랜잭션을 오염시키지 않는다.
    *
@@ -75,8 +75,8 @@ public class SearchService {
   }
 
   /**
-   * 벡터 → Pinecone → MySQL 메타 → ImageResult 조립 공통 경로(텍스트·이미지 검색 공유). 트랜잭션 경계는
-   * 진입 public 메서드(REQUIRES_NEW)에 있고, 이 private 헬퍼는 그 안에서 호출된다.
+   * 벡터 → Pinecone → MySQL 메타 → ImageResult 조립 공통 경로(텍스트·이미지 검색 공유). 트랜잭션 경계는 진입 public
+   * 메서드(REQUIRES_NEW)에 있고, 이 private 헬퍼는 그 안에서 호출된다.
    *
    * @param logCtx 로그용 컨텍스트 문자열(쿼리 길이 등 — 원문 노출 회피)
    * @param echoQuery 응답 {@link SearchResponse#query} 에 담을 값(텍스트 검색은 query, 벡터 검색은 빈 문자열)

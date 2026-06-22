@@ -23,13 +23,13 @@ import org.springframework.stereotype.Component;
  *
  * <p><b>1차(a1)</b>: 비평 모드 가이드를 SYSTEM turn 으로 주입해 후속 COMPOSE 가 멀티모달 비전으로 비평하게 했다.
  *
- * <p><b>2차(a2 — 유사 레퍼런스 첨부)</b>: 업로드 이미지를 CLIP 임베딩({@code FastApiClient.embedImage}) →
- * {@code SearchService.searchByVector} 로 비슷한 레퍼런스를 찾아 {@code ctx.references} 에 싣는다. COMPOSE 가
- * 그 references 로 [N] 인용 컨텍스트를 만들어 "네 그림과 비슷한 [1] 처럼 …" 식 비평이 된다. 임베딩은 텍스트 검색과
- * 동일 CLIP 공간이라 그대로 비교 가능. 설계: {@code docs/decisions/S3A-self-critique-design.md} §2.1·§7.
+ * <p><b>2차(a2 — 유사 레퍼런스 첨부)</b>: 업로드 이미지를 CLIP 임베딩({@code FastApiClient.embedImage}) → {@code
+ * SearchService.searchByVector} 로 비슷한 레퍼런스를 찾아 {@code ctx.references} 에 싣는다. COMPOSE 가 그 references
+ * 로 [N] 인용 컨텍스트를 만들어 "네 그림과 비슷한 [1] 처럼 …" 식 비평이 된다. 임베딩은 텍스트 검색과 동일 CLIP 공간이라 그대로 비교 가능. 설계: {@code
+ * docs/decisions/S3A-self-critique-design.md} §2.1·§7.
  *
- * <p>유사 검색은 부가가치라 <b>실패해도 비평 자체는 막지 않는다</b> — 임베딩/검색 예외나 저점수 차단 시 references 를
- * 빈 채로 두고 a1 의 텍스트(비전) 비평으로 폴백한다. 비평 가이드도 references 유무로 조건부 분기한다([N] 인용 허용/금지).
+ * <p>유사 검색은 부가가치라 <b>실패해도 비평 자체는 막지 않는다</b> — 임베딩/검색 예외나 저점수 차단 시 references 를 빈 채로 두고 a1 의 텍스트(비전)
+ * 비평으로 폴백한다. 비평 가이드도 references 유무로 조건부 분기한다([N] 인용 허용/금지).
  *
  * <p>업로드 이미지가 없으면(방어) 아무것도 하지 않고 통과한다(못 본 이미지 비평 방지).
  */
@@ -43,15 +43,13 @@ public class CritiqueUploadExecutor implements StepExecutor {
 
   /** 점수 가드 임계 — SearchExecutor 와 동일. 동떨어진 무관 레퍼런스가 비평에 섞이지 않게 차단. */
   private static final double AVG_SCORE_FLOOR = 0.2;
+
   private static final double MAX_SCORE_FLOOR = 0.21;
 
   private final FastApiClient fastApiClient;
   private final SearchService searchService;
 
-  /**
-   * references 가 있을 때(유사 레퍼런스 첨부) 비평 가이드 — [N] 인용을 허용한다. 무결성 체커가 범위 밖 인용을
-   * 정정하므로 환각은 여전히 차단된다.
-   */
+  /** references 가 있을 때(유사 레퍼런스 첨부) 비평 가이드 — [N] 인용을 허용한다. 무결성 체커가 범위 밖 인용을 정정하므로 환각은 여전히 차단된다. */
   static final String CRITIQUE_GUIDE_WITH_REFS =
       "[작업물 비평 안내]\n"
           + "사용자가 본인이 그린 작업물을 직접 올리고 평가를 요청했습니다. 첨부된 이미지를 보고 비평해주세요.\n"
@@ -111,8 +109,8 @@ public class CritiqueUploadExecutor implements StepExecutor {
   }
 
   /**
-   * 업로드 이미지 → CLIP 임베딩 → 유사 레퍼런스 검색 → 점수 가드 → ReferenceImage 변환(1-based).
-   * 임베딩/검색 예외나 저점수는 빈 리스트로 흘려 비평 자체는 진행시킨다(부가가치 실패 격리).
+   * 업로드 이미지 → CLIP 임베딩 → 유사 레퍼런스 검색 → 점수 가드 → ReferenceImage 변환(1-based). 임베딩/검색 예외나 저점수는 빈 리스트로 흘려
+   * 비평 자체는 진행시킨다(부가가치 실패 격리).
    */
   private List<ReferenceImage> findSimilarReferences(byte[] imageBytes, String mimeType) {
     try {
@@ -140,9 +138,7 @@ public class CritiqueUploadExecutor implements StepExecutor {
           .toList();
     } catch (RuntimeException e) {
       // 임베딩/검색 실패 — 비평은 막지 않는다(부가가치). 레거시 검색 격리(REQUIRES_NEW)와 같은 결.
-      log.warn(
-          "CRITIQUE_UPLOAD 유사검색 실패 — 텍스트 비평 폴백: error_class={}",
-          e.getClass().getSimpleName());
+      log.warn("CRITIQUE_UPLOAD 유사검색 실패 — 텍스트 비평 폴백: error_class={}", e.getClass().getSimpleName());
       return List.of();
     }
   }
@@ -165,11 +161,21 @@ public class CritiqueUploadExecutor implements StepExecutor {
 
   private static List<String> collectTags(ImageResult r) {
     List<String> tags = new ArrayList<>();
-    if (r.technique() != null) tags.add(r.technique());
-    if (r.subject() != null) tags.add(r.subject());
-    if (r.mood() != null) tags.add(r.mood());
-    if (r.utility() != null) tags.addAll(r.utility());
-    if (r.freeTags() != null) tags.addAll(r.freeTags());
+    if (r.technique() != null) {
+      tags.add(r.technique());
+    }
+    if (r.subject() != null) {
+      tags.add(r.subject());
+    }
+    if (r.mood() != null) {
+      tags.add(r.mood());
+    }
+    if (r.utility() != null) {
+      tags.addAll(r.utility());
+    }
+    if (r.freeTags() != null) {
+      tags.addAll(r.freeTags());
+    }
     return tags;
   }
 }

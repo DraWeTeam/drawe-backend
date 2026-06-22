@@ -28,8 +28,8 @@ import org.junit.jupiter.api.Test;
 /**
  * CritiqueUploadExecutor 단위 테스트 (S3' 트랙 A ① a1 + ② a2).
  *
- * <p>검증: ①이미지 없으면 통과(임베딩 호출 안 함), ②이미지 있고 유사검색 성공 → refs 채움 + [N] 인용 허용 가이드,
- * ③저점수 → refs 비움 + 인용 금지 가이드(폴백), ④임베딩/검색 예외 → 폴백, ⑤기존 history 보존.
+ * <p>검증: ①이미지 없으면 통과(임베딩 호출 안 함), ②이미지 있고 유사검색 성공 → refs 채움 + [N] 인용 허용 가이드, ③저점수 → refs 비움 + 인용 금지
+ * 가이드(폴백), ④임베딩/검색 예외 → 폴백, ⑤기존 history 보존.
  */
 class CritiqueUploadExecutorTest {
 
@@ -40,16 +40,38 @@ class CritiqueUploadExecutorTest {
 
   private static StepContext ctxWith(byte[] imageBytes, List<LlmCallContext.Turn> history) {
     IntentResult intent =
-        new IntentResult(IntentCode.SELF_CRITIQUE, List.of(), imageBytes != null, IntentResult.Tier.RULE);
+        new IntentResult(
+            IntentCode.SELF_CRITIQUE, List.of(), imageBytes != null, IntentResult.Tier.RULE);
     return StepContext.startForCompose(
-        1L, 2L, "session-1", "이거 어때?", "이거 어때?", intent, "/images/9",
-        List.of(), history, imageBytes, "image/png", LlmProvider.GROK);
+        1L,
+        2L,
+        "session-1",
+        "이거 어때?",
+        "이거 어때?",
+        intent,
+        "/images/9",
+        List.of(),
+        history,
+        imageBytes,
+        "image/png",
+        LlmProvider.GROK);
   }
 
   private static ImageResult result(long id, float score) {
     return new ImageResult(
-        id, "src" + id, "http://img/" + id, "user" + id, "name" + id, score,
-        "수채화", "인물", "차분", List.of(), List.of(), List.of(), "UNSPLASH");
+        id,
+        "src" + id,
+        "http://img/" + id,
+        "user" + id,
+        "name" + id,
+        score,
+        "수채화",
+        "인물",
+        "차분",
+        List.of(),
+        List.of(),
+        List.of(),
+        "UNSPLASH");
   }
 
   @Test
@@ -82,7 +104,8 @@ class CritiqueUploadExecutorTest {
     assertThat(result.references().get(0).index()).isEqualTo(1); // 1-based
     assertThat(result.references().get(1).index()).isEqualTo(2);
     assertThat(result.history()).hasSize(1);
-    assertThat(result.history().get(0).content()).isEqualTo(CritiqueUploadExecutor.CRITIQUE_GUIDE_WITH_REFS);
+    assertThat(result.history().get(0).content())
+        .isEqualTo(CritiqueUploadExecutor.CRITIQUE_GUIDE_WITH_REFS);
   }
 
   @Test
@@ -95,19 +118,22 @@ class CritiqueUploadExecutorTest {
     StepContext result = executor.execute(ctxWith(new byte[] {1}, List.of()));
 
     assertThat(result.references()).isEmpty();
-    assertThat(result.history().get(0).content()).isEqualTo(CritiqueUploadExecutor.CRITIQUE_GUIDE_NO_REFS);
+    assertThat(result.history().get(0).content())
+        .isEqualTo(CritiqueUploadExecutor.CRITIQUE_GUIDE_NO_REFS);
   }
 
   @Test
   @DisplayName("검색 결과 0건 → 인용 금지 가이드(폴백)")
   void emptyResultsFallsBack() {
     when(fastApiClient.embedImage(any(), any())).thenReturn(List.of(0.1f));
-    when(searchService.searchByVector(any(), anyInt())).thenReturn(new SearchResponse(List.of(), 0, ""));
+    when(searchService.searchByVector(any(), anyInt()))
+        .thenReturn(new SearchResponse(List.of(), 0, ""));
 
     StepContext result = executor.execute(ctxWith(new byte[] {1}, List.of()));
 
     assertThat(result.references()).isEmpty();
-    assertThat(result.history().get(0).content()).isEqualTo(CritiqueUploadExecutor.CRITIQUE_GUIDE_NO_REFS);
+    assertThat(result.history().get(0).content())
+        .isEqualTo(CritiqueUploadExecutor.CRITIQUE_GUIDE_NO_REFS);
   }
 
   @Test
@@ -118,7 +144,8 @@ class CritiqueUploadExecutorTest {
     StepContext result = executor.execute(ctxWith(new byte[] {1}, List.of()));
 
     assertThat(result.references()).isEmpty();
-    assertThat(result.history().get(0).content()).isEqualTo(CritiqueUploadExecutor.CRITIQUE_GUIDE_NO_REFS);
+    assertThat(result.history().get(0).content())
+        .isEqualTo(CritiqueUploadExecutor.CRITIQUE_GUIDE_NO_REFS);
     verify(searchService, never()).searchByVector(any(), anyInt());
   }
 }
