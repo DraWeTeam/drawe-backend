@@ -11,8 +11,8 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 /**
- * {@link LlmMetrics} 단위 테스트. SimpleMeterRegistry 로 카운터/타이머 증가·태그를 검증한다 (Spring 컨텍스트 불필요).
- * 설계: {@code docs/decisions/S1-micrometer-design.md}.
+ * {@link LlmMetrics} 단위 테스트. SimpleMeterRegistry 로 카운터/타이머 증가·태그를 검증한다 (Spring 컨텍스트 불필요). 설계:
+ * {@code docs/decisions/S1-micrometer-design.md}.
  */
 class LlmMetricsTest {
 
@@ -30,8 +30,7 @@ class LlmMetricsTest {
   void ruleHit() {
     metrics.ruleHit("generate_verb", "GENERATE_NOW");
 
-    Counter route =
-        registry.find("drawe.intent.route").tag("outcome", "rule_hit").counter();
+    Counter route = registry.find("drawe.intent.route").tag("outcome", "rule_hit").counter();
     Counter rule =
         registry
             .find("drawe.intent.rule")
@@ -90,11 +89,7 @@ class LlmMetricsTest {
     metrics.llmCall("GROK", Duration.ofMillis(50), false);
 
     Timer success =
-        registry
-            .find("drawe.llm.call")
-            .tag("provider", "GROK")
-            .tag("outcome", "success")
-            .timer();
+        registry.find("drawe.llm.call").tag("provider", "GROK").tag("outcome", "success").timer();
     Timer error =
         registry.find("drawe.llm.call").tag("provider", "GROK").tag("outcome", "error").timer();
 

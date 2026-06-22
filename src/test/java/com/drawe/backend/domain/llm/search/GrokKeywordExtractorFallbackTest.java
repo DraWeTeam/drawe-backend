@@ -39,8 +39,7 @@ class GrokKeywordExtractorFallbackTest {
   void parsesJsonArray() {
     when(grokService.generate(any())).thenReturn(result("[\"Dynamic\",\"Cat\",\"Pose\"]"));
 
-    assertThat(fallback.extract("역동적인 고양이 포즈"))
-        .containsExactly("dynamic", "cat", "pose");
+    assertThat(fallback.extract("역동적인 고양이 포즈")).containsExactly("dynamic", "cat", "pose");
   }
 
   @Test
@@ -49,15 +48,13 @@ class GrokKeywordExtractorFallbackTest {
     when(grokService.generate(any()))
         .thenReturn(result("키워드: ```json\n[\"watercolor\", \"landscape\"]\n``` 입니다"));
 
-    assertThat(fallback.extract("수채화 풍경"))
-        .containsExactly("watercolor", "landscape");
+    assertThat(fallback.extract("수채화 풍경")).containsExactly("watercolor", "landscape");
   }
 
   @Test
   @DisplayName("중복 제거 + 빈 문자열 필터 + 6개 상한")
   void dedupFilterAndLimit() {
-    when(grokService.generate(any()))
-        .thenReturn(result("[\"cat\",\"cat\",\"\",\"  \",\"pose\"]"));
+    when(grokService.generate(any())).thenReturn(result("[\"cat\",\"cat\",\"\",\"  \",\"pose\"]"));
 
     assertThat(fallback.extract("고양이 포즈")).containsExactly("cat", "pose");
   }

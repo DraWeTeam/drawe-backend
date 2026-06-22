@@ -68,7 +68,9 @@ public class UserPrefSummaryService {
   }
 
   private void appendIfPresent(StringBuilder sb, String label, List<String> values) {
-    if (values == null || values.isEmpty()) return;
+    if (values == null || values.isEmpty()) {
+      return;
+    }
     sb.append("- ").append(label).append(": ").append(String.join(", ", values)).append("\n");
   }
 }

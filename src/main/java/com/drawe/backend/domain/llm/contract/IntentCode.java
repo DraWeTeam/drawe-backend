@@ -1,67 +1,61 @@
 package com.drawe.backend.domain.llm.contract;
 
 /**
- * 사용자 메시지의 의도를 분류하는 코드.
+ * 채팅 의도 분류 코드.
  *
- * <p>강사님 피드백 #5 (case 코드화) + 외부 리뷰 보강 후 확정.
- * 자세한 결정 근거: {@code docs/decisions/AI-pipeline-review-decisions.md} §5
+ * <p>13개 의도 — 외부 리뷰가 짚은 누락 카테고리 (000, 010~013) 포함.
  *
- * <p>현재(S0) 상태: enum 정의만 존재. 실제 런타임 분기는 베타 종료 후 Phase 1에서 도입.
- * 베타 중에는 기존 {@link com.drawe.backend.domain.llm.dto.ExtractionResult.Action} 이 분기를 담당.
+ * <p>설계 결정:
  *
- * <p>{@code ExtractionResult.Action} 과의 매핑 (베타 후 마이그레이션 가이드):
  * <ul>
- *   <li>{@code NEW_SEARCH}    → {@link #NEW_SEARCH}</li>
- *   <li>{@code KEEP}          → {@link #KEEP}</li>
- *   <li>{@code SKIP}          → {@link #SKIP}</li>
- *   <li>{@code GENERATE_NOW}  → {@link #GENERATE}</li>
+ *   <li>009 (N번 참조) <strong>삭제</strong> — 앵커는 의도가 아니라 파라미터. {@link IntentResult#referencedImages()}
+ *       슬롯으로 분리.
+ *   <li>기존 {@code ExtractionResult.Action} 과의 매핑은 마이그레이션 가이드 참조.
  * </ul>
- * 나머지 코드(001~004, 010~013, 000)는 베타 후 신규 도입.
  *
- * <p>이전 plan에 있던 {@code 009} (N번 이미지 참조)는 의도가 아니라 파라미터로 취급하기로 결정,
- * enum에서 제거하고 별도 앵커 슬롯({@link IntentResult#referencedImages})으로 분리한다.
+ * <p>{@code code} 는 룰 매처 / 메트릭 태그 / 로깅에서 사용.
  */
 public enum IntentCode {
 
-  /** 도메인 외 질문 (음식·날씨·잡담 등 비미술). 거절 응답. */
+  /** 도메인 외 질문 (신규) — 미술과 무관한 잡담·일반 질문. */
   OUT_OF_DOMAIN("000"),
 
-  /** 구도 분석. */
+  /** 구도 관련 조언. */
   COMPOSITION("001"),
 
-  /** 빛/명암 분석. */
+  /** 빛 / 명암 조언. */
   LIGHTING("002"),
 
-  /** 색감/색상 조언. */
+  /** 색감 조언. */
   COLOR("003"),
 
-  /** 기법 질문 (수채화/유화/디지털 등). */
+  /** 기법 조언. */
   TECHNIQUE("004"),
 
-  /** 새 레퍼런스 요청. 키워드 추출 → 검색 수행. */
+  /** 새 검색 — Komoran + 사전 + 폴백 → CLIP 검색. */
   NEW_SEARCH("005"),
 
-  /** 기존 레퍼런스 유지 / 같은 레퍼런스에 대한 세부 질문. */
+  /** 직전 결과 유지 (이어서 얘기). */
   KEEP("006"),
 
-  /** 잡담/감사. 짧은 응답, 레퍼런스 없음. */
+  /** 검색 스킵 (잡담·인사 등 대답만 필요). */
   SKIP("007"),
 
-  /** AI 이미지 생성 요청. PromptTranslator → Bria 호출. */
+  /** 이미지 생성 (Bria). */
   GENERATE("008"),
 
-  // 009 (N번 이미지 참조) — 의도가 아니라 파라미터. IntentResult.referencedImages 슬롯으로 분리.
+  // 009 삭제 — 앵커 [N]번 참조는 IntentResult.referencedImages 슬롯으로
 
-  /** 사용자 본인 작업물 비평 (이미지 업로드 + 평가 요청). 멀티모달 입력 경로. */
+  /** 본인 작업물 비평 (신규) — 사용자 업로드 이미지 분석. */
   SELF_CRITIQUE("010"),
 
-  /** 학습 경로 / 커리큘럼 코칭 ("초보자는 뭐부터?"). */
+  /** 학습 경로 (신규) — "어디서부터 시작해야 해?" 같은 메타 질문. */
   LEARNING_PATH("011"),
 
-  /** 직전 답변에 대한 부연·후속 질문. KEEP과 달리 레퍼런스 유지가 아님. */
+  /** 부연 질문 (신규) — "그게 무슨 뜻이야?" 같은 후속. */
   FOLLOWUP("012"),
 
-  /** 비교 (두 레퍼런스 / 내 시안 vs 레퍼런스). */
+  /** 비교 (신규) — "수채화 vs 유화 차이가 뭐야?". */
   COMPARE("013");
 
   private final String code;

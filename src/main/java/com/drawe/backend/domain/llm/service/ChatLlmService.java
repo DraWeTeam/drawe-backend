@@ -14,14 +14,19 @@ import com.drawe.backend.domain.enums.UserPlan;
 import com.drawe.backend.domain.image.service.ImageGenerationService;
 import com.drawe.backend.domain.image.service.ImageUrlSigner;
 import com.drawe.backend.domain.llm.classifier.IntentResultAdapter;
+import com.drawe.backend.domain.llm.contract.IntentCode;
 import com.drawe.backend.domain.llm.contract.IntentResult;
 import com.drawe.backend.domain.llm.contract.ReferenceImage;
+import com.drawe.backend.domain.llm.contract.SearchStats;
 import com.drawe.backend.domain.llm.contract.StepContext;
 import com.drawe.backend.domain.llm.dto.*;
 import com.drawe.backend.domain.llm.metrics.LlmMetrics;
-import com.drawe.backend.domain.llm.workflow.WorkflowService;
+import com.drawe.backend.domain.llm.output.ComposedOutput;
 import com.drawe.backend.domain.llm.repository.ChatSessionRepository;
 import com.drawe.backend.domain.llm.repository.LlmMessageRepository;
+import com.drawe.backend.domain.llm.session.SessionData;
+import com.drawe.backend.domain.llm.session.SessionService;
+import com.drawe.backend.domain.llm.workflow.WorkflowService;
 import com.drawe.backend.domain.log.SearchLogService;
 import com.drawe.backend.domain.onboarding.UserPrefSummaryService;
 import com.drawe.backend.domain.project.repository.ProjectRepository;
@@ -30,6 +35,7 @@ import com.drawe.backend.domain.search.dto.SearchRequest;
 import com.drawe.backend.domain.search.dto.SearchResponse;
 import com.drawe.backend.domain.search.service.SearchService;
 import com.drawe.backend.global.config.LlmProperties;
+import com.drawe.backend.global.config.WorkflowComposeProperties;
 import com.drawe.backend.global.error.CustomException;
 import com.drawe.backend.global.error.ErrorCode;
 import io.micrometer.core.instrument.MeterRegistry;
@@ -72,6 +78,8 @@ public class ChatLlmService {
   private final UserPrefSummaryService userPrefSummaryService;
   private final AnalyticsEventService analyticsEventService;
   private final ImageUrlSigner imageUrlSigner;
+  private final WorkflowComposeProperties workflowComposeProperties;
+  private final SessionService sessionService;
 
   @Transactional
   public ChatResponse chat(User user, Long projectId, ChatRequest request) {
@@ -100,6 +108,37 @@ public class ChatLlmService {
       return handleGenerateNow(user, project, session, request, decision);
     }
 
+    // 000 OUT_OF_DOMAIN (S3' 트랙 A): 명백한 비미술 도메인 외 질문 → 거절 톤 경로.
+    // 010 과 동일하게 게이트(isLive(000))를 분류 앞에 둬 off 면 완전 무영향(레거시 페르소나 거절로 흘림).
+    // 룰이 매우 보수적이라 미술 맥락이 조금이라도 있으면 발화 안 함(오탐 회피). 도메인이탈 빈도를 메트릭으로 관측.
+    if (rulePreRouter.isOutOfDomain(request.message())
+        && workflowComposeProperties.isLive(IntentCode.OUT_OF_DOMAIN)) {
+      IntentResult ood = intentResultAdapter.adaptOutOfDomain();
+      llmMetrics.ruleHit("out_of_domain", IntentCode.OUT_OF_DOMAIN.code());
+      List<LlmCallContext.Turn> rejectHistory = new ArrayList<>(history);
+      rejectHistory.add(new LlmCallContext.Turn(MessageRole.SYSTEM, OUT_OF_DOMAIN_GUIDE));
+      return chatViaWorkflow(user, project, session, request, image, rejectHistory, ood);
+    }
+
+    // 010 SELF_CRITIQUE (S3' 트랙 A): 업로드 이미지 + 비평 요청 신호 → 멀티모달 비평 경로.
+    // 게이트(isLive(010))를 분류 앞에 둔다 — off 면 010 IntentResult 자체를 만들지 않고 아래 기존 경로로
+    // 흘러, 010 이 레거시에 도달하지 않는다(설계 §6 = 완전 무영향). 010 은 live 워크플로에서만 동작한다.
+    if (image.hasImage()
+        && rulePreRouter.isCritiqueRequest(request.message())
+        && workflowComposeProperties.isLive(IntentCode.SELF_CRITIQUE)) {
+      IntentResult critique = intentResultAdapter.adaptSelfCritique(List.of());
+      llmMetrics.ruleHit("self_critique", IntentCode.SELF_CRITIQUE.code());
+      return chatViaWorkflow(user, project, session, request, image, history, critique);
+    }
+
+    // ⑤ 메인경로 전환(shadow→live): 의도가 live 플래그에 켜져 있으면 레거시 직접 합성 대신
+    // 전체 워크플로(WorkflowService)로 응답을 만든다. 기본은 전부 off 라 아래 레거시 경로가 그대로 돈다.
+    IntentResult intent =
+        intentResultAdapter.adapt(decision, routed.ruleDecided(), List.of(), image.hasImage());
+    if (workflowComposeProperties.isLive(intent.code())) {
+      return chatViaWorkflow(user, project, session, request, image, history, intent);
+    }
+
     List<ImageResult> references =
         handleSearchDecision(user, project, session.getId(), request.message(), routed);
 
@@ -110,11 +149,10 @@ public class ChatLlmService {
     if (!references.isEmpty()) {
       String referenceContext = buildReferenceContext(references);
       history.add(new LlmCallContext.Turn(MessageRole.SYSTEM, referenceContext));
-    } else {
-      // 레퍼런스가 없을 때:
-      // 답변은 짧고 단정한 한 줄로 — "자료가 부족한 것 같아요. AI 이미지로 생성해드릴까요?" 류.
-      // 시스템이 이 답변과 함께 생성 버튼을 자동 노출한다 (offerGenerate=true).
-      // LLM 본인이 이미지를 만든 척하는 표현은 금지.
+    } else if (decision.action() == ExtractionResult.Action.NEW_SEARCH) {
+      // NEW_SEARCH 인데 검색 결과가 비었을 때만 'AI 생성 제안' 톤으로 마무리한다.
+      // (SKIP/KEEP 은 애초에 검색을 안 했으므로 이 안내가 부적절 — 아래 분기로 빠진다.)
+      // 답변은 짧고 단정한 한 줄로. 시스템이 이 답변과 함께 생성 버튼을 자동 노출한다(offerGenerate=true).
       history.add(
           new LlmCallContext.Turn(
               MessageRole.SYSTEM,
@@ -131,6 +169,35 @@ public class ChatLlmService {
                   + "- 네가 만들지 않은 이미지를 만든 척하는 표현:\n"
                   + "  \"만들어왔어요\", \"만들어드렸어요\", \"준비해봤어요\", \"여기 이미지요\" 등.\n"
                   + "- \"잠시만요\", \"어떤 분위기·구도\"처럼 길게 되묻거나 약속을 늘이지 마세요."));
+    } else if (decision.action() == ExtractionResult.Action.FOLLOWUP) {
+      // 012 FOLLOWUP — 직전 ASSISTANT 답변에 대한 부연·후속 질문("더 설명"/"말로 설명"/"어때?").
+      // 검색·생성 모두 안 하고 직전 답변을 이어서 풀어준다. 베타에서 이 의도를 못 알아듣고
+      // "자료가 부족한 것 같아요. AI 이미지로 생성해드릴까요?"를 반복한 게 만족도 저하의 직접 원인 →
+      // 여기서 'AI 생성 권유'를 명시적으로 금지한다.
+      history.add(new LlmCallContext.Turn(MessageRole.SYSTEM, FOLLOWUP_GUIDE));
+    } else if (decision.action() == ExtractionResult.Action.COMPARE) {
+      // 013 COMPARE — 이미 맥락에 있는 대상(앞서 보여준 레퍼런스·옵션) 비교 요청("1번이랑 2번 중 뭐가 나아?").
+      // FOLLOWUP 과 같은 정신: 검색·생성을 안 하고 이미 있는 것을 비교·대조해 설명한다. 'AI 생성 권유' 금지.
+      history.add(new LlmCallContext.Turn(MessageRole.SYSTEM, COMPARE_GUIDE));
+    } else {
+      // SKIP/KEEP — 인사·감사·확인 같은 단독 표현이거나 이전 맥락 유지. 검색을 안 했으니
+      // 'AI 생성 제안'·'참고 이미지 없음' 안내는 부적절하다. 사용자의 말에 자연스럽게 반응만 한다.
+      history.add(
+          new LlmCallContext.Turn(
+              MessageRole.SYSTEM,
+              "[대화 안내]\n"
+                  + "이번 발화는 검색이 필요 없는 짧은 대화(인사·감사·확인·가벼운 반응)입니다.\n"
+                  + "\n"
+                  + "응답 가이드:\n"
+                  + "- 사용자의 말에 자연스럽고 따뜻하게 한두 문장으로 반응하세요.\n"
+                  + "- 감사 인사엔 가볍게 받아주세요. 예: \"천만에요! 또 막히는 부분 있으면 편하게 말해요.\"\n"
+                  + "- 굳이 새 주제를 강요하거나 \"그림 얘기로 돌아올까요?\"처럼 형식적으로 되묻지 마세요.\n"
+                  + "- 대화가 자연스럽게 이어지도록, 필요하면 가볍게 다음을 권하는 정도면 충분합니다.\n"
+                  + "\n"
+                  + "금지:\n"
+                  + "- [1], [2] 같은 인용 표현 (참고 이미지 없음).\n"
+                  + "- AI 이미지 생성 제안 (지금 맥락이 아님).\n"
+                  + "- 만들지 않은 이미지를 만든 척하는 표현."));
     }
 
     LlmProvider provider = resolveProvider(user);
@@ -218,11 +285,282 @@ public class ChatLlmService {
   }
 
   /**
-   * 의도 분류: 결정론적 룰 프리라우터를 먼저 시도하고, 미스면 Grok 풀 분류로 폴백한다.
+   * ⑤ live 경로 — 전체 워크플로({@link WorkflowService})로 응답을 합성한다(설계 §3.3 "2번: 전체 워크플로").
    *
-   * <p>룰 히트/미스를 analytics(DB) + Micrometer(실시간) 로 집계해 ADR §4 DoD(룰 적중률 ≥ 30%, 분류 latency ≤
-   * 300ms) 를 측정한다.
+   * <p>레거시 {@link #chat} 직접 합성과 책임 분담은 같다: <b>합성(검색→referenceContext→스키마 강제 LLM→파싱→ 무결성)은
+   * Executor</b>, <b>저장·analytics·메트릭·ChatResponse 조립은 여기</b>. {@code startForCompose} 로
+   * history(persona 포함)·이미지·provider 를 실어 보내고, 결과 {@code finalCtx.composedOutput()} 에서
+   * message·citations·offerGenerate 를, {@code composeModel/composeLatencyMs} 에서 메타를 꺼낸다.
+   *
+   * <p><b>레거시 대비 동등성(2026-06 갭 닫음):</b> 점수 가드(avg&lt;0.2 || max&lt;0.21 무관 결과 차단)는 {@code
+   * SearchExecutor} 가, SEARCH_EXECUTED/BLOCKED·DECISION_KEEP/SKIP analytics 는 {@code
+   * emitSearchAnalytics}/ {@code emitDecisionAnalytics} 가 재현한다(레거시 {@code handleSearchDecision} 과
+   * payload 동등).
+   *
+   * <p><b>⚠ 남은 의도된 차이:</b> 검색 키워드가 Grok(레거시)→Komoran(EXTRACT_KEYWORDS, live)로 바뀐다 — 같은 입력에 검색 결과가
+   * 갈릴 수 있다. shadow 경로가 ref id 겹침({@code drawe.workflow.shadow})을 측정하므로, 한 의도라도 shadow outcome 이
+   * {@code match} 가 아니면 그 의도는 live 로 켜지 않는다. 켜질 때마다 한 줄 WARN.
    */
+  private ChatResponse chatViaWorkflow(
+      User user,
+      Project project,
+      ChatSession session,
+      ChatRequest request,
+      ImageInputResolver.Resolved image,
+      List<LlmCallContext.Turn> history,
+      IntentResult intent) {
+
+    log.warn(
+        "⚙️ COMPOSE live 경로: code={} session={} — 점수가드·검색/결정 analytics 재현됨, "
+            + "남은 차이는 키워드 Grok→Komoran(shadow outcome 확인 후 켤 것)",
+        intent.code().code(),
+        session.getId());
+
+    LlmProvider provider = resolveProvider(user);
+
+    // ① 단기메모리(Redis) 조회/복원 — KEEP 멀티턴 맥락유지의 진입점(SCRUM-88 배선).
+    //    cache miss 면 MySQL 직전 ASSISTANT references 로 복원. 직전 턴 레퍼런스를 ② 로 주입한다.
+    SessionData sessionData = sessionService.getOrRestore(user.getId(), project.getId(), session);
+    List<ReferenceImage> previousReferences = sessionData.previousReferences();
+
+    StepContext initial =
+        StepContext.startForCompose(
+            user.getId(),
+            project.getId(),
+            session.getId(),
+            request.message(),
+            request.message(),
+            intent,
+            request.imageUrl(),
+            previousReferences, // ② List.of() → 직전 턴 레퍼런스 (KEEP 시 ComposeExecutor 가 재사용)
+            history,
+            image.bytes(),
+            image.mimeType(),
+            provider);
+
+    // 사용자 메시지 저장 (레거시와 동일 — 합성 성공 여부와 무관하게 사용자 입력은 남긴다).
+    LlmMessage userMsg = new LlmMessage();
+    userMsg.setChatSession(session);
+    userMsg.setRole(MessageRole.USER);
+    userMsg.setContent(request.message());
+    userMsg.setHasImage(image.hasImage());
+    userMsg.setImageUrl(image.storedUrl());
+    llmMessageRepository.save(userMsg);
+
+    LlmMessage assistantMsg = new LlmMessage();
+    assistantMsg.setChatSession(session);
+    assistantMsg.setRole(MessageRole.ASSISTANT);
+    assistantMsg.setProvider(provider);
+    assistantMsg.setHasImage(false);
+
+    long llmStart = System.nanoTime();
+    try {
+      StepContext finalCtx = workflowService.run(intent, initial);
+
+      ComposedOutput output = finalCtx.composedOutput();
+      if (output == null) {
+        // COMPOSE 가 끝까지 못 갔다(예: step 예외로 부분 성공). 레거시처럼 AI_SERVICE_ERROR 로 떨어뜨린다.
+        log.error("COMPOSE live: composedOutput 이 null — 워크플로 미완. session={}", session.getId());
+        throw new CustomException(ErrorCode.AI_SERVICE_ERROR);
+      }
+
+      List<ReferenceImage> refs = finalCtx.references();
+      final boolean offerGenerate =
+          output.offerGenerate() || (intent.code() == IntentCode.NEW_SEARCH && refs.isEmpty());
+
+      // SEARCH analytics(SEARCH_EXECUTED/BLOCKED) — Executor 가 아니라 여기서 발사한다(갭 닫기).
+      // SearchExecutor 가 점수가드 판정·통계를 finalCtx.searchStats() 로 실어 줬다. shadow 경로는 이 메서드를
+      // 안 타므로 중복 발사되지 않는다. payload 는 레거시 handleSearchDecision 과 동등.
+      emitSearchAnalytics(user, session.getId(), finalCtx.searchStats(), request.message());
+
+      // DECISION_KEEP / DECISION_SKIP — 레거시 handleSearchDecision 의 KEEP/SKIP case 가 발사하던 의사결정
+      // 텔레메트리. live 는 handleSearchDecision 을 안 타므로 여기서 재현한다(검색을 안 돈 의도에만 발사).
+      emitDecisionAnalytics(user, session.getId(), intent.code(), request.message());
+
+      final List<ChatResponse.ReferenceItem> refItems = toReferenceItems(refs);
+
+      assistantMsg.setContent(output.message());
+      assistantMsg.setModel(finalCtx.composeModel());
+      assistantMsg.setLatencyMs(
+          finalCtx.composeLatencyMs() == null ? 0 : finalCtx.composeLatencyMs());
+      assistantMsg.setStatus(LlmCallStatus.SUCCESS);
+      if (!refItems.isEmpty()) {
+        assistantMsg.setReferences(refItems);
+      }
+      llmMessageRepository.save(assistantMsg);
+      session.setLastActive(Instant.now());
+
+      // ④ 이번 턴 결과를 Redis 단기메모리에 저장 — 다음 턴 KEEP 이 ① 에서 lookup 한다.
+      //    이번 턴에 새 검색 결과가 있으면(NEW_SEARCH) 그걸로 갱신, 없으면(KEEP/SKIP) 직전 refs 를 유지한다.
+      persistSessionMemory(sessionData, intent, refs);
+
+      int latencyMs = finalCtx.composeLatencyMs() == null ? 0 : finalCtx.composeLatencyMs();
+      Map<String, Object> successPayload = new HashMap<>();
+      successPayload.put("latency_ms", latencyMs);
+      successPayload.put(
+          "response_length", output.message() != null ? output.message().length() : 0);
+      successPayload.put("provider", provider.name());
+      successPayload.put("model", finalCtx.composeModel());
+      successPayload.put("reference_count", refItems.size());
+      successPayload.put("has_image_input", image.hasImage());
+      successPayload.put("offer_generate", offerGenerate);
+      successPayload.put("workflow_live", true);
+      analyticsEventService.track(
+          AnalyticsEventType.CHAT_SUCCESS, user, session.getId(), successPayload);
+      llmMetrics.llmCall(provider.name(), Duration.ofMillis(latencyMs), true);
+
+      return new ChatResponse(
+          session.getId(),
+          "guide",
+          output.message(),
+          signReferenceUrls(refItems),
+          referencesAction(intent.code()),
+          offerGenerate,
+          offerGenerate ? request.message() : null,
+          null);
+    } catch (CustomException e) {
+      llmMetrics.llmCall(provider.name(), Duration.ofNanos(System.nanoTime() - llmStart), false);
+      persistFailure(assistantMsg, e);
+      trackError(user, session.getId(), provider, e);
+      throw e;
+    } catch (Exception e) {
+      llmMetrics.llmCall(provider.name(), Duration.ofNanos(System.nanoTime() - llmStart), false);
+      log.error(
+          "COMPOSE live 실패 session={} provider={} error_class={}",
+          session.getId(),
+          provider,
+          e.getClass().getSimpleName());
+      persistFailure(assistantMsg, e);
+      trackError(user, session.getId(), provider, e);
+      throw new CustomException(ErrorCode.AI_SERVICE_ERROR);
+    }
+  }
+
+  /**
+   * IntentCode → 프론트 노출용 referencesAction 문자열. <b>숫자 코드("006"/"010" 등)를 절대 노출하지 않는다</b> — 레거시
+   * chat() 은 {@code decision.action().name()}("NEW_SEARCH"/"KEEP"/"SKIP") 문자열을 줬고, 프론트 계약도 그 문자열
+   * 기준이다. NEW_SEARCH·SELF_CRITIQUE 는 고유 의미라 그대로, 그 외 COMPOSE 종착 의도(KEEP·SKIP·001~004 미술의도)는 "참고 유지"
+   * 의미로 처리한다.
+   */
+  private static String referencesAction(IntentCode code) {
+    return switch (code) {
+      case NEW_SEARCH -> "NEW_SEARCH";
+      case SELF_CRITIQUE -> "SELF_CRITIQUE";
+      case OUT_OF_DOMAIN -> "OUT_OF_DOMAIN";
+      case FOLLOWUP -> "FOLLOWUP";
+      case COMPARE -> "COMPARE";
+      case SKIP -> "SKIP";
+      default -> "KEEP"; // KEEP(006) + 미술의도 001~004 등
+    };
+  }
+
+  /**
+   * live 경로 전용 어댑터 — {@link ReferenceImage}(contract) → {@link ChatResponse.ReferenceItem}.
+   *
+   * <p>{@code ReferenceImage} 에 복원된 표시 필드(photographerUsername·technique·subject·mood·source)를 그대로
+   * 옮겨 레거시 {@link #convertToReferenceItems}(ImageResult 기반)와 동등한 ReferenceItem 을 만든다. 프론트의 AI
+   * 배지(source) 등이 정상 동작한다.
+   */
+  private List<ChatResponse.ReferenceItem> toReferenceItems(List<ReferenceImage> refs) {
+    return refs.stream()
+        .map(
+            r ->
+                new ChatResponse.ReferenceItem(
+                    r.imageId(),
+                    r.url(),
+                    r.photographer(),
+                    r.photographerUsername(),
+                    r.technique(),
+                    r.subject(),
+                    r.mood(),
+                    r.score() == null ? null : r.score().doubleValue(),
+                    r.source()))
+        .toList();
+  }
+
+  /**
+   * DECISION_KEEP / DECISION_SKIP 발사 — 레거시 {@code handleSearchDecision} 의 {@code case KEEP/SKIP} 과
+   * 동등. payload 는 레거시와 같이 {@code message_length} 한 칸. NEW_SEARCH 는 SEARCH_EXECUTED/BLOCKED 로 이미
+   * 텔레메트리가 남으므로 여기선 발사하지 않는다(레거시도 KEEP/SKIP case 에서만 DECISION_* 를 쐈다).
+   */
+  private void emitDecisionAnalytics(User user, String sessionId, IntentCode code, String message) {
+    if (code == IntentCode.NEW_SEARCH) {
+      return;
+    }
+    Map<String, Object> payload = Map.of("message_length", message != null ? message.length() : 0);
+    analyticsEventService.track(decisionEventType(code), user, sessionId, payload);
+  }
+
+  /** 직전 유지 의도(KEEP·001~004)→DECISION_KEEP, SKIP/FOLLOWUP(012)/COMPARE(013)는 각자 이벤트로 접는다. */
+  private static String decisionEventType(IntentCode code) {
+    return switch (code) {
+      case SKIP -> AnalyticsEventType.DECISION_SKIP;
+      case FOLLOWUP -> AnalyticsEventType.DECISION_FOLLOWUP; // 012
+      case COMPARE -> AnalyticsEventType.DECISION_COMPARE; // 013
+      default -> AnalyticsEventType.DECISION_KEEP;
+    };
+  }
+
+  /**
+   * ④ 단기메모리 저장 — 이번 턴 결과를 Redis 에 반영해 다음 턴 KEEP 의 {@code getOrRestore} 가 lookup 하게 한다.
+   *
+   * <p>분기 기준은 "이번 턴이 새 검색을 의도했는가"({@code NEW_SEARCH})이지 결과 유무가 아니다:
+   *
+   * <ul>
+   *   <li><b>NEW_SEARCH</b>: 이번 턴 결과({@code thisTurnRefs})로 references 를 <b>덮어쓴다</b> — 결과가 비어도
+   *       (점수가드 차단·검색 예외로 0건) 빈 리스트로 덮어 메모리를 비운다. 화면엔 references 0건이 나갔는데 메모리만 옛 refs 를 살려두면, 다음
+   *       KEEP 이 화면에 없던 레퍼런스를 부활시키는 UI-메모리 불일치가 난다.
+   *   <li><b>KEEP/SKIP</b>: 이번 턴 검색 자체가 없었으므로 기존 {@code previousReferences} 를 그대로 유지하고 의도·시각만 갱신한다.
+   * </ul>
+   *
+   * 저장 자체는 best-effort — {@code SessionService#save} 구현이 Redis I/O 장애를 삼키므로 응답을 깨지 않는다.
+   */
+  private void persistSessionMemory(
+      SessionData sessionData, IntentResult intent, List<ReferenceImage> thisTurnRefs) {
+    SessionData updated =
+        intent.code() == IntentCode.NEW_SEARCH
+            // NEW_SEARCH 는 결과 유무와 무관하게 이번 턴 결과로 덮어쓴다(0건이면 비움 = 화면과 일치).
+            ? sessionData.withSearchResult(intent.code(), List.of(), thisTurnRefs)
+            // KEEP/SKIP — 검색 안 함, 직전 references 유지.
+            : sessionData.withIntent(intent.code());
+    sessionService.save(updated);
+  }
+
+  /**
+   * live 경로 SEARCH analytics 발사 — {@link SearchStats}(SearchExecutor 가 채움) 기준으로 SEARCH_EXECUTED 또는
+   * SEARCH_BLOCKED 를 발사한다. payload 는 레거시 {@code handleSearchDecision} 과 동등(keyword·result_count·
+   * avg/max/min·blocked·image_ids·scores). NEW_SEARCH 가 아니거나(=SEARCH step 없음) 키워드가 없어 검색을 안 했으면
+   * {@code searchStats} 가 null 이라 발사하지 않는다.
+   */
+  private void emitSearchAnalytics(User user, String sessionId, SearchStats stats, String message) {
+    if (stats == null) {
+      return;
+    }
+    Map<String, Object> payload = new HashMap<>();
+    payload.put("keyword", stats.keyword());
+    // message_length — 레거시 handleSearchDecision payload 에는 있으나 SearchStats 에 슬롯이 없어 누락됐던 필드.
+    // SearchExecutor 는 message 를 모르므로(키워드만 받음) 호출부에서 직접 채운다.
+    payload.put("message_length", message != null ? message.length() : 0);
+    payload.put("result_count", stats.resultCount());
+    payload.put("avg_score", stats.avgScore());
+    payload.put("max_score", stats.maxScore());
+    payload.put("min_score", stats.minScore());
+    payload.put("image_ids", stats.imageIds());
+    payload.put("scores", stats.scores());
+    payload.put("blocked", stats.blocked());
+    if (stats.blocked()) {
+      payload.put("blocked_reason", stats.blockedReason());
+      // 검색 예외 차단이면 error_class·error_code 도 함께 — 레거시 handleSearchDecision catch 와 동등.
+      if (stats.errorClass() != null) {
+        payload.put("error_class", stats.errorClass());
+        payload.put("error_code", "SEARCH_FAILED");
+      }
+      analyticsEventService.track(AnalyticsEventType.SEARCH_BLOCKED, user, sessionId, payload);
+    } else {
+      analyticsEventService.track(AnalyticsEventType.SEARCH_EXECUTED, user, sessionId, payload);
+    }
+  }
+
   /**
    * 분류 결과 + 어느 tier 가 결정했는지. {@code ruleDecided}=true 면 룰(RulePreRouter), false 면 Grok 폴백. shadow
    * 워크플로우의 IntentResult tier 판정에 쓴다.
@@ -341,9 +679,12 @@ public class ChatLlmService {
                   .toList();
           searchPayload.put("scores", scores);
 
-          if (avgScore < 0.2 || maxScore < 0.21) {
+          // 점수 가드(베타 튜닝 2026-06-17, SearchExecutor 와 동일): avg<0.2 AND max<0.24 일 때만 차단.
+          // avg 가 낮아도 max≥0.24 면 최상위 레퍼런스는 관련 있다고 보고 살린다(rescue). 기존 OR(max<0.21)은
+          // 차단율 29%로 과했고 "상위장 멀쩡한데 평균에 발목" 케이스를 통째 버렸다. 근거: SearchExecutor 주석.
+          if (avgScore < 0.2 && maxScore < 0.24) {
             log.warn(
-                "❌ 무관 결과 판단: 검색 결과 차단 (avg={} < 0.2 || max={} < 0.21)",
+                "❌ 무관 결과 판단: 검색 결과 차단 (avg={} < 0.2 AND max={} < 0.24)",
                 String.format("%.3f", avgScore),
                 String.format("%.3f", maxScore));
             log.info("================================");
@@ -406,17 +747,37 @@ public class ChatLlmService {
             Map.of("message_length", messageLength));
         return List.of();
 
+      case FOLLOWUP:
+        // 012 — 직전 답변 부연. 검색 없이 직전 답변을 이어 설명한다(references 비움). 빈도 관측용 analytics.
+        log.info("💬 FOLLOWUP — 직전 답변 부연 (session={})", sessionId);
+        analyticsEventService.track(
+            AnalyticsEventType.DECISION_FOLLOWUP,
+            user,
+            sessionId,
+            Map.of("message_length", messageLength));
+        return List.of();
+
+      case COMPARE:
+        // 013 — 맥락 대상 비교. 검색·생성 없이 이미 있는 대상을 비교 설명한다(references 비움). 빈도 관측용 analytics.
+        log.info("🔍 COMPARE — 맥락 대상 비교 (session={})", sessionId);
+        analyticsEventService.track(
+            AnalyticsEventType.DECISION_COMPARE,
+            user,
+            sessionId,
+            Map.of("message_length", messageLength));
+        return List.of();
+
       default:
         return List.of();
     }
   }
 
   /**
-   * shadow 워크플로우 (트랙 A ③). 기존 chat() 검색 결과는 그대로 두고, WorkflowService(Komoran 경로)를 병렬로 한 번
-   * 돌려 같은 입력에 어떤 검색 결과를 냈을지 비교·로깅·메트릭만 한다. **실제 응답에는 영향이 없으며 예외도 절대 밖으로 던지지 않는다.**
+   * shadow 워크플로우 (트랙 A ③). 기존 chat() 검색 결과는 그대로 두고, WorkflowService(Komoran 경로)를 병렬로 한 번 돌려 같은 입력에
+   * 어떤 검색 결과를 냈을지 비교·로깅·메트릭만 한다. **실제 응답에는 영향이 없으며 예외도 절대 밖으로 던지지 않는다.**
    *
-   * <p>핵심 비교: 기존은 Grok 이 뽑은 영문 키워드로 검색, shadow 는 Komoran 형태소→사전 키워드로 검색. ref id 집합이
-   * 얼마나 겹치는지(match/partial/miss)로 트랙 B 사전 품질을 검증한다. 설계: {@code
+   * <p>핵심 비교: 기존은 Grok 이 뽑은 영문 키워드로 검색, shadow 는 Komoran 형태소→사전 키워드로 검색. ref id 집합이 얼마나
+   * 겹치는지(match/partial/miss)로 트랙 B 사전 품질을 검증한다. 설계: {@code
    * docs/decisions/S1A-workflow-shadow-design.md}.
    */
   private void shadowWorkflow(
@@ -433,20 +794,12 @@ public class ChatLlmService {
       // shadow 1차: rawMessage 를 그대로 cleanedMessage 로 (앵커 전처리는 ① 2차 몫).
       StepContext initial =
           StepContext.start(
-              user.getId(),
-              project.getId(),
-              sessionId,
-              message,
-              message,
-              intent,
-              null,
-              List.of());
+              user.getId(), project.getId(), sessionId, message, message, intent, null, List.of());
 
       StepContext finalCtx = workflowService.run(intent, initial);
 
       // 기존(baseline) vs shadow 검색결과 ref id 비교.
-      Set<Long> baseIds =
-          baselineResults.stream().map(ImageResult::id).collect(Collectors.toSet());
+      Set<Long> baseIds = baselineResults.stream().map(ImageResult::id).collect(Collectors.toSet());
       Set<Long> shadowIds =
           finalCtx.references().stream().map(ReferenceImage::imageId).collect(Collectors.toSet());
 
@@ -471,13 +824,13 @@ public class ChatLlmService {
    * baseline(Grok 키워드) vs shadow(Komoran 키워드) 검색결과 ref id 집합을 비교해 outcome 을 판정한다.
    *
    * <ul>
-   *   <li>{@code match} — 두 집합이 정확히 같음 (shadow 가 baseline 을 완전 재현)</li>
-   *   <li>{@code partial} — 교집합은 있으나 완전히 같지는 않음</li>
-   *   <li>{@code miss} — shadow 가 비었거나 교집합이 전혀 없음</li>
+   *   <li>{@code match} — 두 집합이 정확히 같음 (shadow 가 baseline 을 완전 재현)
+   *   <li>{@code partial} — 교집합은 있으나 완전히 같지는 않음
+   *   <li>{@code miss} — shadow 가 비었거나 교집합이 전혀 없음
    * </ul>
    *
-   * <p>shadow 가 비었으면(키워드 추출/검색이 결과 0) baseline 과 무관하게 {@code miss}. {@code error}(예외)는
-   * 호출 측 catch 가 별도로 찍으므로 여기서는 다루지 않는다. 순수 함수 — 테스트 용이성을 위해 분리.
+   * <p>shadow 가 비었으면(키워드 추출/검색이 결과 0) baseline 과 무관하게 {@code miss}. {@code error}(예외)는 호출 측 catch 가
+   * 별도로 찍으므로 여기서는 다루지 않는다. 순수 함수 — 테스트 용이성을 위해 분리.
    */
   static String classifyShadowOutcome(Set<Long> baseIds, Set<Long> shadowIds) {
     if (shadowIds.isEmpty()) {
@@ -712,6 +1065,66 @@ public class ChatLlmService {
     return s != null && !s.isBlank();
   }
 
+  /**
+   * 000 OUT_OF_DOMAIN 거절 톤 가이드 (S3' 트랙 A). 페르소나 v2 도메인 락이 이미 거절을 하지만, 룰이 000 으로 단정한 경우 COMPOSE 가
+   * 확실히 "부드럽게 거절 + 그림으로 복귀" 톤을 내도록 SYSTEM turn 으로 한 번 더 못박는다. references 없는 거절이라 [N] 인용 금지(무결성 체커가
+   * 범위밖 인용을 차단).
+   */
+  private static final String OUT_OF_DOMAIN_GUIDE =
+      "[도메인 외 질문 안내]\n"
+          + "이번 발화는 그림·드로잉과 무관한 주제(날씨·뉴스·코딩·요리 등)로 보입니다.\n"
+          + "\n"
+          + "응답 가이드:\n"
+          + "- 딱딱하게 자르지 말고 친구처럼 가볍게 거절한 뒤, 곧바로 그림 쪽으로 자연스럽게 데려오세요.\n"
+          + "- 예: \"아 그건 제가 잘 몰라요 ㅎㅎ 대신 지금 그리는 거 같이 봐드릴까요?\"\n"
+          + "- 매번 똑같은 문장 반복 금지. 상황·어조에 맞게 한 톤 가볍게.\n"
+          + "\n"
+          + "금지:\n"
+          + "- 도메인 외 주제에 실제로 답하기(날씨 알려주기, 코드 짜주기 등).\n"
+          + "- [1], [2] 같은 인용 표현 (참고 이미지 없음).\n"
+          + "- 길게 훈계하거나 매뉴얼처럼 말하기.";
+
+  /**
+   * 012 FOLLOWUP 가이드 (S3' 트랙 A). 사용자가 직전 ASSISTANT 답변을 이어 "더 설명/말로 설명/어때?"처럼 부연·재설명·평가를 요청한 경우다.
+   * 검색·생성을 안 하므로 references 가 없고, 직전 답변을 이어서 풀어주는 게 핵심. 베타에서 이 의도를 "자료 부족 → AI 생성 권유"로 오답한 게 만족도
+   * 저하의 직접 원인이라 그 톤을 명시 금지한다.
+   */
+  private static final String FOLLOWUP_GUIDE =
+      "[후속 질문 안내]\n"
+          + "이번 발화는 방금 당신(어시스턴트)이 한 답변에 대한 부연·재설명·평가 요청입니다.\n"
+          + "(예: \"더 설명\", \"말로 설명해\", \"어때?\", \"그 외는?\", \"왜 그렇게 해?\")\n"
+          + "\n"
+          + "응답 가이드:\n"
+          + "- 새 주제로 넘어가지 말고, 바로 직전 답변을 이어서 더 구체적으로 풀어주세요.\n"
+          + "- \"말로 설명\"·\"피드백해줘\"처럼 평가를 원하면, 회피하지 말고 작업물/맥락에 대해 솔직하고 구체적으로 답하세요.\n"
+          + "- 한두 문장으로 핵심을 더하거나, 직전에 말한 부분을 다른 말로 다시 설명해 주세요.\n"
+          + "\n"
+          + "금지:\n"
+          + "- \"자료가 부족한 것 같아요. AI 이미지로 생성해드릴까요?\" 류의 회피·생성 권유 (사용자는 '말'을 원함).\n"
+          + "- AI 이미지 생성 제안 (지금 맥락이 아님).\n"
+          + "- [1], [2] 같은 인용 표현 (참고 이미지 없음).\n"
+          + "- \"잠시만요\", \"어떤 부분이요?\"처럼 되묻기만 하고 답을 미루는 표현.";
+
+  /**
+   * 013 COMPARE 가이드 (S3' 트랙 A). 사용자가 이미 맥락에 나온 대상(앞서 보여준 레퍼런스·옵션)을 "1번이랑 2번 중 뭐가 나아?"처럼 비교·대조해달라고 한
+   * 경우다. FOLLOWUP 과 같은 정신 — 검색·생성을 안 하므로 references 가 없고, 이미 있는 대상을 비교 설명하는 게 핵심. 'AI 생성 권유' 오답을 명시
+   * 금지한다.
+   */
+  private static final String COMPARE_GUIDE =
+      "[비교 안내]\n"
+          + "이번 발화는 이미 대화에 나온 대상(앞서 보여준 참고 이미지·옵션·직전 답변에서 언급한 것들)을\n"
+          + "비교·대조해 달라는 요청입니다. (예: \"1번이랑 2번 중 뭐가 나아?\", \"둘 차이가 뭐야?\")\n"
+          + "\n"
+          + "응답 가이드:\n"
+          + "- 새로 검색하거나 만들지 말고, 이미 맥락에 있는 대상들을 짚어 차이점·장단점을 구체적으로 비교하세요.\n"
+          + "- 구도·명암·색감·기법 등 미술적 관점에서 각각의 특징과 어떤 상황에 어느 쪽이 나은지 설명하세요.\n"
+          + "- 한쪽으로 치우치지 말고, 사용자의 목적(예: 초보/분위기)을 고려해 균형 있게 판단을 더하세요.\n"
+          + "\n"
+          + "금지:\n"
+          + "- \"자료가 부족한 것 같아요. AI 이미지로 생성해드릴까요?\" 류의 회피·생성 권유 (사용자는 비교를 원함).\n"
+          + "- AI 이미지 생성 제안 (지금 맥락이 아님).\n"
+          + "- \"어떤 걸 비교할까요?\"처럼 되묻기만 하고 비교를 미루는 표현.";
+
   // 한글/영문 변형까지 묶어 한 번에 잡는다. 너무 좁으면 누락, 너무 넓으면 일반 대화에서 오탐.
   // 핵심 키워드: "생성" + "버튼", 또는 "만들어드릴" / "만들어 드릴" / "생성해드릴", "AI 이미지" + 동작어.
   private static final java.util.regex.Pattern GENERATE_OFFER_PATTERN =
@@ -851,8 +1264,8 @@ public class ChatLlmService {
   }
 
   /**
-   * 응답으로 내보내기 직전 레퍼런스 이미지 URL 에 서명을 붙인다. DB 에는 상대경로({@code /images/{id}})로 저장하고 (만료가 박힌 URL 을
-   * 영구 저장하지 않기 위해) 노출 순간에만 서명한다. Unsplash 절대 URL 은 signer 가 그대로 통과시킨다.
+   * 응답으로 내보내기 직전 레퍼런스 이미지 URL 에 서명을 붙인다. DB 에는 상대경로({@code /images/{id}})로 저장하고 (만료가 박힌 URL 을 영구
+   * 저장하지 않기 위해) 노출 순간에만 서명한다. Unsplash 절대 URL 은 signer 가 그대로 통과시킨다.
    */
   private List<ChatResponse.ReferenceItem> signReferenceUrls(
       List<ChatResponse.ReferenceItem> items) {

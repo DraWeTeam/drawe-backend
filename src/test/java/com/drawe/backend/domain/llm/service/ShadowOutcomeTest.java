@@ -9,9 +9,8 @@ import org.junit.jupiter.api.Test;
 /**
  * {@link ChatLlmService#classifyShadowOutcome} 단위 테스트 (트랙 A ③ shadow 검증).
  *
- * <p>shadow 워크플로우(Komoran 경로)가 기존 baseline(Grok 키워드 경로) 검색결과를 얼마나 재현하는지
- * match/partial/miss 로 판정하는 로직을 검증한다. 이 메트릭이 트랙 B 사전 품질의 실증 지표가 되므로
- * 분류 경계가 정확해야 한다.
+ * <p>shadow 워크플로우(Komoran 경로)가 기존 baseline(Grok 키워드 경로) 검색결과를 얼마나 재현하는지 match/partial/miss 로 판정하는
+ * 로직을 검증한다. 이 메트릭이 트랙 B 사전 품질의 실증 지표가 되므로 분류 경계가 정확해야 한다.
  */
 class ShadowOutcomeTest {
 
