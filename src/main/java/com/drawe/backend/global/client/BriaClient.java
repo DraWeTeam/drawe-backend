@@ -110,22 +110,32 @@ public class BriaClient {
   }
 
   private String extractImageUrl(JsonNode root) {
-    if (root == null) return null;
+    if (root == null) {
+      return null;
+    }
     String direct = root.path("image_url").asText(null);
-    if (direct != null && !direct.isBlank()) return direct;
+    if (direct != null && !direct.isBlank()) {
+      return direct;
+    }
     JsonNode result = root.path("result");
     if (result.isObject()) {
       String fromObj = result.path("image_url").asText(null);
-      if (fromObj != null && !fromObj.isBlank()) return fromObj;
+      if (fromObj != null && !fromObj.isBlank()) {
+        return fromObj;
+      }
     }
     if (result.isArray() && result.size() > 0) {
       JsonNode first = result.get(0);
       String fromArray = first.path("image_url").asText(null);
-      if (fromArray != null && !fromArray.isBlank()) return fromArray;
+      if (fromArray != null && !fromArray.isBlank()) {
+        return fromArray;
+      }
       JsonNode urls = first.path("urls");
       if (urls.isArray() && urls.size() > 0) {
         String u = urls.get(0).asText(null);
-        if (u != null && !u.isBlank()) return u;
+        if (u != null && !u.isBlank()) {
+          return u;
+        }
       }
     }
     return null;
