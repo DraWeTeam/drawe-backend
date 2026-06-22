@@ -22,7 +22,7 @@ package com.drawe.backend.domain.llm.contract;
  */
 public interface StepExecutor {
 
-  /** 이 executor 가 담당하는 step 종류. Spring 의 Map<StepType, StepExecutor> 주입 키로 사용. */
+  /** 이 executor 가 담당하는 step 종류. Spring 의 {@code Map<StepType, StepExecutor>} 주입 키로 사용. */
   StepType type();
 
   /**

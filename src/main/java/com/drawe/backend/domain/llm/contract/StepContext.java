@@ -46,17 +46,14 @@ public record StepContext(
     Long projectId,
     String sessionId,
 
-    /** 원문 — 디버깅용. PII 주의. */
+    // 원문 — 디버깅용. PII 주의.
     String rawMessage,
-
-    /** 정규화된 메시지 — B의 Komoran 입력. */
+    // 정규화된 메시지 — B의 Komoran 입력.
     String cleanedMessage,
     IntentResult intent,
-
-    /** 010 SELF_CRITIQUE 용. 없으면 null. */
+    // 010 SELF_CRITIQUE 용. 없으면 null.
     String uploadedImageUrl,
-
-    /** 006 KEEP 용. 직전 검색 결과. */
+    // 006 KEEP 용. 직전 검색 결과.
     List<ReferenceImage> previousReferences,
 
     // ── 누적 (B가 채움) ──

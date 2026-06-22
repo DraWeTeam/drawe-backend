@@ -98,7 +98,7 @@ public class ArtTermsDictionary {
 
         String ko = parts[0].trim();
         String en = parts[1].trim();
-        String category = parts[2].trim();
+        final String category = parts[2].trim();
 
         if (ko.isEmpty() || en.isEmpty()) {
           log.warn("Skipping line {} with empty ko or en: '{}'", lineNumber, trimmed);

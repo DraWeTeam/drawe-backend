@@ -100,11 +100,21 @@ public class SearchExecutor implements StepExecutor {
 
   private static List<String> collectTags(ImageResult r) {
     List<String> tags = new ArrayList<>();
-    if (r.technique() != null) tags.add(r.technique());
-    if (r.subject() != null) tags.add(r.subject());
-    if (r.mood() != null) tags.add(r.mood());
-    if (r.utility() != null) tags.addAll(r.utility());
-    if (r.freeTags() != null) tags.addAll(r.freeTags());
+    if (r.technique() != null) {
+      tags.add(r.technique());
+    }
+    if (r.subject() != null) {
+      tags.add(r.subject());
+    }
+    if (r.mood() != null) {
+      tags.add(r.mood());
+    }
+    if (r.utility() != null) {
+      tags.addAll(r.utility());
+    }
+    if (r.freeTags() != null) {
+      tags.addAll(r.freeTags());
+    }
     return tags;
   }
 }

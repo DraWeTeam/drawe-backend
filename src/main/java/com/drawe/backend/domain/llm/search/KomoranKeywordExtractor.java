@@ -118,7 +118,8 @@ public class KomoranKeywordExtractor {
     ClassPathResource resource = new ClassPathResource(USER_DIC_RESOURCE);
     if (!resource.exists()) {
       log.warn(
-          "User dictionary not found in classpath: {} — running with default Komoran dictionary only",
+          "User dictionary not found in classpath: {} — running with default Komoran"
+              + " dictionary only",
           USER_DIC_RESOURCE);
       return;
     }
