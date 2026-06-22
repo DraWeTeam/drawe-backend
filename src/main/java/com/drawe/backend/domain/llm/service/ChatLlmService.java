@@ -12,9 +12,16 @@ import com.drawe.backend.domain.enums.LlmProvider;
 import com.drawe.backend.domain.enums.MessageRole;
 import com.drawe.backend.domain.enums.UserPlan;
 import com.drawe.backend.domain.image.service.ImageGenerationService;
+import com.drawe.backend.domain.image.service.ImageUrlSigner;
+import com.drawe.backend.domain.llm.classifier.IntentResultAdapter;
+import com.drawe.backend.domain.llm.contract.IntentResult;
+import com.drawe.backend.domain.llm.contract.ReferenceImage;
+import com.drawe.backend.domain.llm.contract.StepContext;
 import com.drawe.backend.domain.llm.dto.*;
+import com.drawe.backend.domain.llm.metrics.LlmMetrics;
 import com.drawe.backend.domain.llm.repository.ChatSessionRepository;
 import com.drawe.backend.domain.llm.repository.LlmMessageRepository;
+import com.drawe.backend.domain.llm.workflow.WorkflowService;
 import com.drawe.backend.domain.log.SearchLogService;
 import com.drawe.backend.domain.onboarding.UserPrefSummaryService;
 import com.drawe.backend.domain.project.repository.ProjectRepository;
@@ -25,11 +32,14 @@ import com.drawe.backend.domain.search.service.SearchService;
 import com.drawe.backend.global.config.LlmProperties;
 import com.drawe.backend.global.error.CustomException;
 import com.drawe.backend.global.error.ErrorCode;
+import io.micrometer.core.instrument.MeterRegistry;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
@@ -50,12 +60,18 @@ public class ChatLlmService {
   private final ImageInputResolver imageInputResolver;
   private final List<LlmService> llmServices;
 
+  private final RulePreRouter rulePreRouter;
   private final KeywordExtractor keywordExtractor;
+  private final IntentResultAdapter intentResultAdapter;
+  private final WorkflowService workflowService;
+  private final LlmMetrics llmMetrics;
+  private final MeterRegistry meterRegistry;
   private final SearchService searchService;
   private final SearchLogService searchLogService;
   private final ImageGenerationService imageGenerationService;
   private final UserPrefSummaryService userPrefSummaryService;
   private final AnalyticsEventService analyticsEventService;
+  private final ImageUrlSigner imageUrlSigner;
 
   @Transactional
   public ChatResponse chat(User user, Long projectId, ChatRequest request) {
@@ -73,8 +89,10 @@ public class ChatLlmService {
     List<LlmMessage> all = llmMessageRepository.findByChatSessionOrderByCreatedAtAsc(session);
     List<LlmCallContext.Turn> history = trimHistory(all, llmProperties.getMaxHistory());
 
-    // 검색 결정
-    ExtractionResult decision = keywordExtractor.extract(request.message(), history);
+    // 검색 결정: 결정론적 룰 프리라우터 먼저 → 미스면 Grok 풀 분류로 폴백.
+    // 명확한 기능 신호(인사·감사·명시적 생성)는 LLM 콜 없이 룰로 끝낸다 (S1' 트랙 A).
+    RoutedIntent routed = routeIntent(user, session.getId(), request.message(), history);
+    ExtractionResult decision = routed.decision();
 
     // 사용자가 명시적으로 이미지 생성을 요청한 경우 — 검색·LLM 답변 모두 건너뛰고
     // 바로 Bria 호출해서 응답에 생성된 이미지 url 을 담아 돌려준다.
@@ -83,7 +101,7 @@ public class ChatLlmService {
     }
 
     List<ImageResult> references =
-        handleSearchDecision(user, project, session.getId(), request.message(), decision);
+        handleSearchDecision(user, project, session.getId(), request.message(), routed);
 
     // 검색은 시도했지만 적합한 레퍼런스가 없을 때 AI 이미지 생성을 제안한다.
     boolean offerGenerate =
@@ -134,6 +152,7 @@ public class ChatLlmService {
     assistantMsg.setProvider(provider);
     assistantMsg.setHasImage(false);
 
+    long llmStart = System.nanoTime();
     try {
       LlmCallResult result = llm.generate(ctx);
       assistantMsg.setContent(result.content());
@@ -168,21 +187,25 @@ public class ChatLlmService {
       successPayload.put("offer_generate", offerGenerate);
       analyticsEventService.track(
           AnalyticsEventType.CHAT_SUCCESS, user, session.getId(), successPayload);
+      // LLM 내부 측정 latency 를 그대로 Timer 에 (외부 nanoTime 보다 정확).
+      llmMetrics.llmCall(provider.name(), Duration.ofMillis(result.latencyMs()), true);
 
       return new ChatResponse(
           session.getId(),
           "guide",
           result.content(),
-          convertToReferenceItems(references),
+          signReferenceUrls(refItems),
           decision.action().name(), // "NEW_SEARCH" | "KEEP" | "SKIP"
           offerGenerate,
           offerGenerate ? request.message() : null,
           null);
     } catch (CustomException e) {
+      llmMetrics.llmCall(provider.name(), Duration.ofNanos(System.nanoTime() - llmStart), false);
       persistFailure(assistantMsg, e);
       trackError(user, session.getId(), provider, e);
       throw e;
     } catch (Exception e) {
+      llmMetrics.llmCall(provider.name(), Duration.ofNanos(System.nanoTime() - llmStart), false);
       log.error(
           "LLM 호출 실패 session={} provider={} error_class={}",
           session.getId(),
@@ -191,6 +214,51 @@ public class ChatLlmService {
       persistFailure(assistantMsg, e);
       trackError(user, session.getId(), provider, e);
       throw new CustomException(ErrorCode.AI_SERVICE_ERROR);
+    }
+  }
+
+  /**
+   * 의도 분류: 결정론적 룰 프리라우터를 먼저 시도하고, 미스면 Grok 풀 분류로 폴백한다.
+   *
+   * <p>룰 히트/미스를 analytics(DB) + Micrometer(실시간) 로 집계해 ADR §4 DoD(룰 적중률 ≥ 30%, 분류 latency ≤ 300ms) 를
+   * 측정한다.
+   */
+  /**
+   * 분류 결과 + 어느 tier 가 결정했는지. {@code ruleDecided}=true 면 룰(RulePreRouter), false 면 Grok 폴백. shadow
+   * 워크플로우의 IntentResult tier 판정에 쓴다.
+   */
+  private record RoutedIntent(ExtractionResult decision, boolean ruleDecided) {}
+
+  private RoutedIntent routeIntent(
+      User user, String sessionId, String message, List<LlmCallContext.Turn> history) {
+    RulePreRouter.Decision ruleDecision = rulePreRouter.route(message, history);
+
+    if (ruleDecision.isHit()) {
+      String action = ruleDecision.result().action().name();
+      Map<String, Object> payload = new HashMap<>();
+      payload.put("rule_id", ruleDecision.ruleId());
+      payload.put("action", action);
+      analyticsEventService.track(AnalyticsEventType.INTENT_RULE_HIT, user, sessionId, payload);
+      llmMetrics.ruleHit(ruleDecision.ruleId(), action);
+      return new RoutedIntent(ruleDecision.result(), true);
+    }
+
+    analyticsEventService.track(
+        AnalyticsEventType.INTENT_RULE_MISS,
+        user,
+        sessionId,
+        Map.of("message_length", message != null ? message.length() : 0));
+    llmMetrics.ruleMiss();
+
+    // 룰 미스 → 경량 분류기(Grok) 호출. latency 를 Timer 로 측정 (DoD ≤300ms).
+    long start = System.nanoTime();
+    boolean success = false;
+    try {
+      ExtractionResult result = keywordExtractor.extract(message, history);
+      success = true;
+      return new RoutedIntent(result, false);
+    } finally {
+      llmMetrics.classifyLatency(Duration.ofNanos(System.nanoTime() - start), success);
     }
   }
 
@@ -205,8 +273,9 @@ public class ChatLlmService {
   }
 
   private List<ImageResult> handleSearchDecision(
-      User user, Project project, String sessionId, String message, ExtractionResult decision) {
+      User user, Project project, String sessionId, String message, RoutedIntent routed) {
 
+    ExtractionResult decision = routed.decision();
     int messageLength = message != null ? message.length() : 0;
 
     switch (decision.action()) {
@@ -292,6 +361,11 @@ public class ChatLlmService {
           searchPayload.put("blocked", false);
           analyticsEventService.track(
               AnalyticsEventType.SEARCH_EXECUTED, user, sessionId, searchPayload);
+
+          // shadow: WorkflowService(Komoran 경로)를 병렬로 한 번 돌려 기존(Grok 키워드) 검색결과와
+          // 비교만 한다. 실제 응답에는 영향 없음 (트랙 A ③ shadow 연결).
+          shadowWorkflow(user, project, sessionId, message, routed, result.results());
+
           return result.results();
 
         } catch (Exception e) {
@@ -337,6 +411,79 @@ public class ChatLlmService {
     }
   }
 
+  /**
+   * shadow 워크플로우 (트랙 A ③). 기존 chat() 검색 결과는 그대로 두고, WorkflowService(Komoran 경로)를 병렬로 한 번 돌려 같은 입력에
+   * 어떤 검색 결과를 냈을지 비교·로깅·메트릭만 한다. **실제 응답에는 영향이 없으며 예외도 절대 밖으로 던지지 않는다.**
+   *
+   * <p>핵심 비교: 기존은 Grok 이 뽑은 영문 키워드로 검색, shadow 는 Komoran 형태소→사전 키워드로 검색. ref id 집합이 얼마나
+   * 겹치는지(match/partial/miss)로 트랙 B 사전 품질을 검증한다. 설계: {@code
+   * docs/decisions/S1A-workflow-shadow-design.md}.
+   */
+  private void shadowWorkflow(
+      User user,
+      Project project,
+      String sessionId,
+      String message,
+      RoutedIntent routed,
+      List<ImageResult> baselineResults) {
+    try {
+      IntentResult intent =
+          intentResultAdapter.adapt(routed.decision(), routed.ruleDecided(), List.of(), false);
+
+      // shadow 1차: rawMessage 를 그대로 cleanedMessage 로 (앵커 전처리는 ① 2차 몫).
+      StepContext initial =
+          StepContext.start(
+              user.getId(), project.getId(), sessionId, message, message, intent, null, List.of());
+
+      StepContext finalCtx = workflowService.run(intent, initial);
+
+      // 기존(baseline) vs shadow 검색결과 ref id 비교.
+      Set<Long> baseIds = baselineResults.stream().map(ImageResult::id).collect(Collectors.toSet());
+      Set<Long> shadowIds =
+          finalCtx.references().stream().map(ReferenceImage::imageId).collect(Collectors.toSet());
+
+      String outcome = classifyShadowOutcome(baseIds, shadowIds);
+
+      log.info(
+          "🔬 shadow workflow: code={} outcome={} base_n={} shadow_n={} overlap={}",
+          intent.code().code(),
+          outcome,
+          baseIds.size(),
+          shadowIds.size(),
+          shadowIds.stream().filter(baseIds::contains).count());
+      meterRegistry.counter("drawe.workflow.shadow", "outcome", outcome).increment();
+    } catch (Exception e) {
+      // shadow 는 절대 실제 응답을 깨면 안 된다 — 어떤 예외도 삼키고 메트릭만.
+      log.warn("shadow workflow 실패(무시): error_class={}", e.getClass().getSimpleName());
+      meterRegistry.counter("drawe.workflow.shadow", "outcome", "error").increment();
+    }
+  }
+
+  /**
+   * baseline(Grok 키워드) vs shadow(Komoran 키워드) 검색결과 ref id 집합을 비교해 outcome 을 판정한다.
+   *
+   * <ul>
+   *   <li>{@code match} — 두 집합이 정확히 같음 (shadow 가 baseline 을 완전 재현)
+   *   <li>{@code partial} — 교집합은 있으나 완전히 같지는 않음
+   *   <li>{@code miss} — shadow 가 비었거나 교집합이 전혀 없음
+   * </ul>
+   *
+   * <p>shadow 가 비었으면(키워드 추출/검색이 결과 0) baseline 과 무관하게 {@code miss}. {@code error}(예외)는 호출 측 catch 가
+   * 별도로 찍으므로 여기서는 다루지 않는다. 순수 함수 — 테스트 용이성을 위해 분리.
+   */
+  static String classifyShadowOutcome(Set<Long> baseIds, Set<Long> shadowIds) {
+    if (shadowIds.isEmpty()) {
+      return "miss";
+    }
+    if (shadowIds.equals(baseIds)) {
+      return "match";
+    }
+    if (shadowIds.stream().anyMatch(baseIds::contains)) {
+      return "partial";
+    }
+    return "miss";
+  }
+
   private double round3(double v) {
     return Math.round(v * 1000.0) / 1000.0;
   }
@@ -348,7 +495,7 @@ public class ChatLlmService {
     List<ChatHistoryResponse.HistoryItem> items =
         llmMessageRepository.findByChatSessionOrderByCreatedAtAsc(session).stream()
             .filter(m -> m.getRole() != MessageRole.SYSTEM)
-            .map(ChatHistoryResponse.HistoryItem::from)
+            .map(m -> ChatHistoryResponse.HistoryItem.from(m, imageUrlSigner))
             .toList();
     return new ChatHistoryResponse(session.getId(), items);
   }
@@ -408,7 +555,8 @@ public class ChatLlmService {
         decision.action().name(), // "GENERATE_NOW"
         false,
         null,
-        new ChatResponse.GeneratedImage(image.getId(), image.getUrl(), decision.keywords()));
+        new ChatResponse.GeneratedImage(
+            image.getId(), imageUrlSigner.sign(image.getUrl()), decision.keywords()));
   }
 
   /** 사용자가 "AI 이미지 만들어주세요" 버튼을 누른 경우 호출. Bria 로 이미지 생성 후 세션에 ASSISTANT 메시지로 기록. */
@@ -432,7 +580,7 @@ public class ChatLlmService {
     session.setLastActive(Instant.now());
 
     return new GenerateImageResponse(
-        session.getId(), image.getId(), image.getUrl(), request.prompt());
+        session.getId(), image.getId(), imageUrlSigner.sign(image.getUrl()), request.prompt());
   }
 
   @Transactional
@@ -690,6 +838,28 @@ public class ChatLlmService {
                     r.subject(),
                     r.mood(),
                     r.score().doubleValue(),
+                    r.source()))
+        .toList();
+  }
+
+  /**
+   * 응답으로 내보내기 직전 레퍼런스 이미지 URL 에 서명을 붙인다. DB 에는 상대경로({@code /images/{id}})로 저장하고 (만료가 박힌 URL 을 영구
+   * 저장하지 않기 위해) 노출 순간에만 서명한다. Unsplash 절대 URL 은 signer 가 그대로 통과시킨다.
+   */
+  private List<ChatResponse.ReferenceItem> signReferenceUrls(
+      List<ChatResponse.ReferenceItem> items) {
+    return items.stream()
+        .map(
+            r ->
+                new ChatResponse.ReferenceItem(
+                    r.id(),
+                    imageUrlSigner.sign(r.url()),
+                    r.photographerName(),
+                    r.photographerUsername(),
+                    r.technique(),
+                    r.subject(),
+                    r.mood(),
+                    r.similarity(),
                     r.source()))
         .toList();
   }

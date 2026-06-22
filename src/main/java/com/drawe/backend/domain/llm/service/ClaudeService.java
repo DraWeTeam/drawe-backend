@@ -4,6 +4,7 @@ import com.drawe.backend.domain.enums.LlmProvider;
 import com.drawe.backend.domain.enums.MessageRole;
 import com.drawe.backend.domain.llm.dto.LlmCallContext;
 import com.drawe.backend.domain.llm.dto.LlmCallResult;
+import com.drawe.backend.global.client.HttpClientFactory;
 import com.drawe.backend.global.config.LlmProperties;
 import com.drawe.backend.global.error.CustomException;
 import com.drawe.backend.global.error.ErrorCode;
@@ -12,22 +13,28 @@ import java.util.Base64;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.MediaType;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestClient;
 
+/**
+ * Claude(Anthropic) LLM 클라이언트. connect 3s / read 30s 타임아웃으로 hang 차단. 서킷 제외(실패는 {@code
+ * AI_SERVICE_ERROR} 로 변환되어 상위에서 처리). 설계: {@code docs/decisions/S1-resilience4j-design.md}.
+ */
 @Slf4j
 @Service
-@RequiredArgsConstructor
 public class ClaudeService implements LlmService {
 
   private static final String ANTHROPIC_VERSION = "2023-06-01";
   private static final int DEFAULT_MAX_TOKENS = 1024;
 
   private final LlmProperties properties;
-  private final RestClient restClient = RestClient.create();
+  private final RestClient restClient = HttpClientFactory.restClient(3000, 30000);
+
+  public ClaudeService(LlmProperties properties) {
+    this.properties = properties;
+  }
 
   @Override
   public LlmProvider provider() {

@@ -5,69 +5,64 @@ import java.util.List;
 import lombok.With;
 
 /**
- * 파이프라인 컨텍스트 — step 간 상태 전달.
+ * 파이프라인 전체가 거쳐가는 불변 컨텍스트. 각 {@link StepExecutor} 는 이 record 를 받아 일부 필드를 채워 새 record 를 반환한다 ({@code
+ * with*} wither 사용).
  *
- * <p><strong>불변(record) + {@code @With}</strong>: Lombok 이 {@code withKeywords(...)}, {@code
- * withReferences(...)} 등 wither 자동 생성. 각 step 은 기존 ctx 를 수정하지 않고 새 ctx 를 반환.
+ * <p>핵심 계약 — A·B 가 가장 자주 읽고 쓰는 타입이므로 필드 변경 시 양쪽 합의 필수.
  *
- * <h2>필드 분류</h2>
+ * <h3>필드 분류</h3>
  *
  * <ul>
- *   <li><strong>입력 (A가 채움, B는 읽기만)</strong>: {@code userId}, {@code projectId}, {@code sessionId},
- *       {@code rawMessage}, {@code cleanedMessage}, {@code intent}, {@code uploadedImageUrl},
- *       {@code previousReferences}
- *   <li><strong>누적 (B가 채움)</strong>: {@code keywords}, {@code references}
- *   <li><strong>누적 (A가 채움)</strong>: {@code generatedImage}, {@code composedAnswer}
+ *   <li><b>입력</b> (A 의 pre-route/분류가 채움, B 는 읽기만): userId, projectId, sessionId, rawMessage,
+ *       cleanedMessage, intent, uploadedImageUrl, previousReferences
+ *   <li><b>누적</b> (B 가 채움): keywords, references
+ *   <li><b>누적</b> (A 가 채움): generatedImage, composedAnswer
  * </ul>
  *
- * <h2>cleanedMessage 정규화 규칙 (#1 답변 박제)</h2>
+ * <h3>cleanedMessage 정규화 규칙 (A 합의안)</h3>
  *
- * <p>A의 TextPreprocessor 가 적용:
+ * <ol>
+ *   <li>{@code trim()} + 연속 공백을 단일 공백으로 압축
+ *   <li>앵커 패턴 {@code \[?\d+\]?번} 제거 → 제거된 숫자는 {@link IntentResult#referencedImages} 슬롯으로
+ *   <li>소문자화 안 함 (한글 무관, 영문은 형태소 분석기가 처리)
+ *   <li>오타교정 안 함 (별도 단계, 현재 범위 밖)
+ * </ol>
  *
- * <table border="1">
- *   <tr><th>적용</th><th>안 함</th></tr>
- *   <tr><td>{@code trim()}</td>
- *       <td>소문자화 (한글 무관, 영문은 Komoran이 처리)</td></tr>
- *   <tr><td>연속 공백 → 단일 공백</td>
- *       <td>오타교정 (별도 단계, 현재 범위 밖)</td></tr>
- *   <tr><td>{@code \[?\d+\]?번} 제거 → 숫자는 {@code referencedImages} 슬롯으로</td>
- *       <td>형태소/품사 필터링 (B의 Komoran 책임)</td></tr>
- * </table>
+ * 예: {@code " 벚꽃 [2]번처럼 더 보여줘 "} → cleanedMessage: {@code "벚꽃 처럼 더 보여줘"}, referencedImages: {@code
+ * [2]}
  *
- * <p>예시: <br>
- * 입력: {@code " 벚꽃 [2]번처럼 더 보여줘 "} <br>
- * → {@code cleanedMessage}: {@code "벚꽃 처럼 더 보여줘"} <br>
- * → {@code referencedImages}: {@code [2]}
+ * <h3>불변 + 누적 패턴</h3>
+ *
+ * Lombok {@code @With} 가 {@code withKeywords(...)}, {@code withReferences(...)} 등을 자동 생성한다. 각
+ * Executor 는 {@code return ctx.withKeywords(kw);} 형태로 반환.
  */
 @With
 public record StepContext(
-    // ── 입력 (A가 채움, B는 읽기만) ──
+    // ── 입력 ──
     Long userId,
     Long projectId,
     String sessionId,
-
-    // 원문 — 디버깅용. PII 주의.
     String rawMessage,
-    // 정규화된 메시지 — B의 Komoran 입력.
     String cleanedMessage,
     IntentResult intent,
-    // 010 SELF_CRITIQUE 용. 없으면 null.
     String uploadedImageUrl,
-    // 006 KEEP 용. 직전 검색 결과.
     List<ReferenceImage> previousReferences,
 
-    // ── 누적 (B가 채움) ──
+    // ── 누적: B ──
     List<String> keywords,
     List<ReferenceImage> references,
 
-    // ── 누적 (A가 채움) ──
+    // ── 누적: A ──
     GenerateImageResponse generatedImage,
     String composedAnswer) {
 
-  /**
-   * 새 파이프라인 시작 — A의 분류·전처리 결과로 초기 ctx 생성. 누적 필드(keywords, references, generatedImage,
-   * composedAnswer) 는 null 로 시작.
-   */
+  public StepContext {
+    previousReferences = previousReferences == null ? List.of() : List.copyOf(previousReferences);
+    keywords = keywords == null ? List.of() : List.copyOf(keywords);
+    references = references == null ? List.of() : List.copyOf(references);
+  }
+
+  /** 파이프라인 시작 컨텍스트. 누적 필드는 빈 값으로 초기화. */
   public static StepContext start(
       Long userId,
       Long projectId,
@@ -86,10 +81,9 @@ public record StepContext(
         intent,
         uploadedImageUrl,
         previousReferences,
+        List.of(),
+        List.of(),
         null,
-        null, // keywords, references
-        null,
-        null // generatedImage, composedAnswer
-        );
+        null);
   }
 }

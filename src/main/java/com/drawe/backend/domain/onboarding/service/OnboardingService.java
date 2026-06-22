@@ -7,6 +7,7 @@ import com.drawe.backend.domain.UserPrefTag;
 import com.drawe.backend.domain.enums.Axis;
 import com.drawe.backend.domain.image.repository.ImageDraweTagRepository;
 import com.drawe.backend.domain.image.repository.ImageRepository;
+import com.drawe.backend.domain.image.service.ImageUrlSigner;
 import com.drawe.backend.domain.onboarding.UserPrefTagRepository;
 import com.drawe.backend.domain.onboarding.dto.OnboardingImage;
 import java.util.*;
@@ -23,6 +24,7 @@ public class OnboardingService {
   private final ImageRepository imageRepository;
   private final ImageDraweTagRepository imageDraweTagRepository;
   private final UserPrefTagRepository userPrefTagRepository;
+  private final ImageUrlSigner imageUrlSigner;
 
   /** 사용자가 온보딩 완료했는지 여부. */
   @Transactional(readOnly = true)
@@ -55,7 +57,7 @@ public class OnboardingService {
               String label = buildLabel(tag);
               return new OnboardingImage(
                   img.getId(),
-                  img.getUrl(),
+                  imageUrlSigner.sign(img.getUrl()),
                   tag != null ? tag.getTechnique() : null,
                   tag != null ? tag.getSubject() : null,
                   tag != null ? tag.getMood() : null,
